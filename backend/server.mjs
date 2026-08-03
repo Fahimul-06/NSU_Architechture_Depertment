@@ -105,7 +105,7 @@ async function allocateSlot(facultyId,service){
 async function handle(req,res){
   if(req.method==='OPTIONS')return json(res,204);
   const url=new URL(req.url,`http://${req.headers.host}`),p=url.pathname;
-  if(p==='/api/health')return json(res,200,{ok:true,version:'1.5.0-auth-notifications',features:['arrival-alert','faculty-response','scanner-polling','next-student','faculty-call-display'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
+  if(p==='/api/health')return json(res,200,{ok:true,version:'1.6.0-fullscreen-arrival-next-student',features:['arrival-alert','faculty-response','scanner-polling','next-student','faculty-call-display'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
 
   if(p==='/api/auth/faculty/login'&&req.method==='POST'){
     const b=await readBody(req),login=String(b.login||b.employeeId||b.email||'').trim(),password=String(b.password||'');
