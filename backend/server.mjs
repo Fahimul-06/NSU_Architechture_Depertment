@@ -4,12 +4,17 @@ import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import { connectDatabase, closeDatabase } from './db.mjs';
 import { seedIfEmpty } from './seed.mjs';
-import { Student, Faculty, Department, Service, ClassSchedule, ServiceHour, Appointment, ScanLog, PosSession, AuthSession, Notification } from './models/index.mjs';
+import { Student, Faculty, Department, Service, ClassSchedule, ServiceHour, Appointment, ScanLog, PosSession, AuthSession, AdminSession, AuditLog, Notification } from './models/index.mjs';
 
 const PORT = Number(process.env.PORT || 8080);
-const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const CORS_ORIGINS = String(process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || (NODE_ENV==='production'?'':'*')).split(',').map(x=>x.trim()).filter(Boolean);
+const DEVICE_API_KEY = String(process.env.DEVICE_API_KEY || '');
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '');
+const TRUST_PROXY = process.env.TRUST_PROXY === 'true';
 const ARCH_DEPARTMENT_CODE = 'ARCH';
-const json=(res,code,body)=>{res.writeHead(code,{'Content-Type':'application/json','Access-Control-Allow-Origin':CORS_ORIGIN,'Access-Control-Allow-Headers':'Content-Type,Authorization','Access-Control-Allow-Methods':'GET,POST,PUT,DELETE,OPTIONS'}); if(code===204)return res.end(); res.end(JSON.stringify(body));};
+const json=(res,code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Permissions-Policy':'camera=(), microphone=(), geolocation=()','Access-Control-Allow-Origin':res.corsOrigin||'null','Vary':'Origin','Access-Control-Allow-Headers':'Content-Type,Authorization,X-Device-Key','Access-Control-Allow-Methods':'GET,POST,PUT,DELETE,OPTIONS'}); if(code===204)return res.end(); res.end(JSON.stringify(body));};
 const readBody=req=>new Promise((resolve,reject)=>{let b='';req.on('data',c=>{b+=c;if(b.length>1_000_000){reject(new Error('Request body too large.'));req.destroy();}});req.on('end',()=>{try{resolve(b?JSON.parse(b):{});}catch(e){reject(e);}});req.on('error',reject);});
 const normalizeUid=s=>String(s||'').replace(/[^a-fA-F0-9]/g,'').toUpperCase();
 const dayName=d=>['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()];
@@ -45,6 +50,17 @@ async function notifyFaculty(a,type,title,message){
   if(!a?.facultyId)return;
   await Notification.create({id:crypto.randomUUID(),facultyId:a.facultyId,type,title,message,appointmentId:a.id,token:a.token,studentId:a.studentId,studentName:a.studentName,createdAt:new Date()});
 }
+
+
+const loginAttempts=new Map();
+function clientIp(req){return TRUST_PROXY?String(req.headers['x-forwarded-for']||'').split(',')[0].trim():(req.socket.remoteAddress||'unknown');}
+function allowLogin(req){const key=clientIp(req),now=Date.now(),row=loginAttempts.get(key)||{count:0,reset:now+15*60_000};if(now>row.reset){row.count=0;row.reset=now+15*60_000;}row.count++;loginAttempts.set(key,row);return row.count<=10;}
+function secureEqual(a,b){const x=Buffer.from(String(a)),y=Buffer.from(String(b));return x.length===y.length&&crypto.timingSafeEqual(x,y);}
+function requireDevice(req,res){if(!DEVICE_API_KEY||!secureEqual(req.headers['x-device-key']||'',DEVICE_API_KEY)){json(res,401,{message:'Valid device key required.'});return false;}return true;}
+async function authenticatedAdmin(req){const token=bearer(req);if(!token)return null;const session=await AdminSession.findOne({tokenHash:hashToken(token),revokedAt:null,expiresAt:{$gt:new Date()}});if(!session)return null;session.lastUsedAt=new Date();await session.save();return{email:session.email,session};}
+async function requireAdmin(req,res){const admin=await authenticatedAdmin(req);if(!admin){json(res,401,{message:'Administrator login required.'});return null;}return admin;}
+async function audit(req,{actorType,actorId,action,targetType='',targetId='',metadata={}}){try{await AuditLog.create({id:crypto.randomUUID(),actorType,actorId,action,targetType,targetId,ip:clientIp(req),userAgent:String(req.headers['user-agent']||'').slice(0,300),metadata});}catch{}}
+function validateProductionConfig(){if(NODE_ENV!=='production')return;const errors=[];if(!process.env.MONGODB_URI)errors.push('MONGODB_URI');if(CORS_ORIGINS.length===0||CORS_ORIGINS.includes('*'))errors.push('CORS_ORIGINS (explicit dashboard URLs)');if(!DEVICE_API_KEY||DEVICE_API_KEY.length<32)errors.push('DEVICE_API_KEY (32+ chars)');if(!ADMIN_EMAIL)errors.push('ADMIN_EMAIL');if(!ADMIN_PASSWORD||ADMIN_PASSWORD.length<12)errors.push('ADMIN_PASSWORD (12+ chars)');if(!process.env.DEFAULT_FACULTY_PASSWORD||process.env.DEFAULT_FACULTY_PASSWORD.length<12)errors.push('DEFAULT_FACULTY_PASSWORD (12+ chars)');if(String(process.env.AUTO_SEED||'').toLowerCase()!=='false')errors.push('AUTO_SEED=false');if(errors.length)throw new Error('Unsafe production configuration: '+errors.join(', '));}
 
 async function validateArrival(a,{deviceName='Faculty Office Scanner',method='QR'}={}){
   const nowInfo=dhakaParts();
@@ -103,11 +119,25 @@ async function allocateSlot(facultyId,service){
 }
 
 async function handle(req,res){
+  const origin=String(req.headers.origin||'');
+  const allowed=!origin||CORS_ORIGINS.includes('*')||CORS_ORIGINS.includes(origin);
+  res.corsOrigin=allowed?(origin||CORS_ORIGINS[0]||'null'):'null';
+  if(!allowed)return json(res,403,{message:'Origin not allowed.'});
   if(req.method==='OPTIONS')return json(res,204);
   const url=new URL(req.url,`http://${req.headers.host}`),p=url.pathname;
-  if(p==='/api/health')return json(res,200,{ok:true,version:'1.6.0-fullscreen-arrival-next-student',features:['arrival-alert','faculty-response','scanner-polling','next-student','faculty-call-display'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
+  if(p==='/api/readiness')return json(res,mongoose.connection.readyState===1?200:503,{ok:mongoose.connection.readyState===1,database:mongoose.connection.readyState===1?'connected':'disconnected'});
+  if(p==='/api/health')return json(res,200,{ok:true,version:'2.1.0-realtime-arrival',features:['arrival-alert','faculty-response','scanner-polling','next-student','faculty-call-display'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
 
+  if(p==='/api/auth/admin/login'&&req.method==='POST'){
+    if(!allowLogin(req))return json(res,429,{message:'Too many login attempts. Try again later.'});
+    const b=await readBody(req),email=String(b.email||'').trim().toLowerCase(),password=String(b.password||'');
+    if(!ADMIN_EMAIL||!ADMIN_PASSWORD||!secureEqual(email,ADMIN_EMAIL)||!secureEqual(password,ADMIN_PASSWORD))return json(res,401,{message:'Invalid administrator credentials.'});
+    const token=crypto.randomBytes(32).toString('hex');await AdminSession.create({id:crypto.randomUUID(),tokenHash:hashToken(token),email,expiresAt:new Date(Date.now()+8*60*60*1000),lastUsedAt:new Date()});await audit(req,{actorType:'ADMIN',actorId:email,action:'LOGIN'});return json(res,200,{token,email,expiresInSeconds:28800});
+  }
+  if(p==='/api/auth/admin/me'&&req.method==='GET'){const a=await requireAdmin(req,res);if(!a)return;return json(res,200,{email:a.email});}
+  if(p==='/api/auth/admin/logout'&&req.method==='POST'){const a=await requireAdmin(req,res);if(!a)return;a.session.revokedAt=new Date();await a.session.save();await audit(req,{actorType:'ADMIN',actorId:a.email,action:'LOGOUT'});return json(res,200,{ok:true});}
   if(p==='/api/auth/faculty/login'&&req.method==='POST'){
+    if(!allowLogin(req))return json(res,429,{message:'Too many login attempts. Try again later.'});
     const b=await readBody(req),login=String(b.login||b.employeeId||b.email||'').trim(),password=String(b.password||'');
     const faculty=await Faculty.findOne({$or:[{id:login},{email:login.toLowerCase()}],status:'ACTIVE'});
     if(!faculty)return json(res,401,{message:'Invalid employee ID/email or password.'});
@@ -144,6 +174,10 @@ async function handle(req,res){
   if(notificationRead&&req.method==='PUT'){
     const faculty=await requireFaculty(req,res);if(!faculty)return;const item=await Notification.findOneAndUpdate({id:notificationRead[1],facultyId:faculty.id},{$set:{readAt:new Date()}},{new:true}).lean();return item?json(res,200,item):json(res,404,{message:'Notification not found.'});
   }
+  const devicePath=p.startsWith('/api/tickets/')||p.startsWith('/api/pos-sessions/')||(p==='/api/appointments'&&req.method==='POST')||p==='/api/students/by-nfc'||/\/api\/appointments\/[^/]+\/student-message$/.test(p)||/\/api\/faculty\/[^/]+\/call-display$/.test(p);
+  if(devicePath&&!requireDevice(req,res))return;
+  const adminPath=p.startsWith('/api/admin/')||(p==='/api/students'&&['GET','POST'].includes(req.method))||(/^\/api\/students\/[^/]+$/.test(p)&&['PUT','DELETE'].includes(req.method))||(p==='/api/faculties'&&req.method==='POST')||(/^\/api\/faculties\/[^/]+$/.test(p)&&['PUT','DELETE'].includes(req.method))||(p==='/api/departments'&&req.method==='POST')||(/^\/api\/departments\/[^/]+$/.test(p)&&['PUT','DELETE'].includes(req.method));
+  let adminActor=null;if(adminPath){adminActor=await requireAdmin(req,res);if(!adminActor)return;}
   if(p==='/api/students/by-nfc'&&req.method==='GET'){
     const rawUid=url.searchParams.get('uid'),uid=normalizeUid(rawUid);
     if(!uid)return json(res,400,{message:'No NFC UID was received.'});
@@ -200,7 +234,7 @@ async function handle(req,res){
     if(!await Department.exists({code:department}))return json(res,400,{message:'Invalid department.'});
     await assertNfcAvailable(uid);
     const item=await Student.create({id,name:String(b.name).trim(),email:String(b.email||'').trim(),program:String(b.program||'').trim(),department,nfcUid:uid,status:b.status||'ACTIVE'});
-    return json(res,201,plain(item));
+    await audit(req,{actorType:'ADMIN',actorId:adminActor?.email,action:'CREATE_STUDENT',targetType:'STUDENT',targetId:id});return json(res,201,plain(item));
   }
   const studentMatch=p.match(/^\/api\/students\/([^/]+)$/);
   if(studentMatch&&req.method==='PUT'){
@@ -224,7 +258,7 @@ async function handle(req,res){
     if(!await Department.exists({code:departmentCode}))return json(res,400,{message:'Invalid department.'});
     await assertNfcAvailable(uid);
     const item=await Faculty.create({id,name:String(b.name).trim(),email:String(b.email||'').trim().toLowerCase(),designation:b.designation,departmentCode,officeRoom:String(b.officeRoom||'').trim(),nfcUid:uid,status:b.status||'ACTIVE',passwordHash:passwordHash(DEFAULT_FACULTY_PASSWORD)});
-    return json(res,201,plain(item));
+    await audit(req,{actorType:'ADMIN',actorId:adminActor?.email,action:'CREATE_FACULTY',targetType:'FACULTY',targetId:id});return json(res,201,plain(item));
   }
   const facultyMatch=p.match(/^\/api\/faculties\/([^/]+)$/);
   if(facultyMatch&&req.method==='PUT'){
@@ -342,6 +376,7 @@ async function handle(req,res){
 
 const server=http.createServer(async(req,res)=>{try{await handle(req,res);}catch(e){console.error(e);const duplicate=duplicateMessage(e);json(res,e.statusCode||e.status|| (duplicate?409:500),{message:duplicate||e.message||'Server error'});}});
 
+validateProductionConfig();
 await connectDatabase();
 if(String(process.env.AUTO_SEED||'true').toLowerCase()==='true')await seedIfEmpty(false);
 server.listen(PORT,'0.0.0.0',()=>console.log(`NSU Architecture Queue API running at http://localhost:${PORT}`));

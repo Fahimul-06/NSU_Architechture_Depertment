@@ -39,7 +39,7 @@ Remove-Item $Out -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $Out | Out-Null
 
 Write-Host 'Building POS installer...' -ForegroundColor Cyan
-& jpackage --type exe --name 'NSU Architecture POS' --app-version 1.6.0 `
+& jpackage --type exe --name 'NSU Architecture POS' --app-version 2.1.0 `
   --vendor 'North South University Architecture' `
   --description 'NFC appointment ticket POS for the NSU Architecture Department' `
   --input (Join-Path $Root 'pos\target') --main-jar university-nfc-pos.jar `
@@ -51,7 +51,7 @@ $ScannerInput = Join-Path $Scanner 'package-input'
 Remove-Item $ScannerInput -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $ScannerInput | Out-Null
 Copy-Item $ScannerJar $ScannerInput
-& jpackage --type exe --name 'NSU Architecture Scanner' --app-version 1.6.0 `
+& jpackage --type exe --name 'NSU Architecture Scanner' --app-version 2.1.0 `
   --vendor 'North South University Architecture' `
   --description 'NFC and QR appointment validation scanner' `
   --input $ScannerInput --main-jar university-ticket-scanner.jar `

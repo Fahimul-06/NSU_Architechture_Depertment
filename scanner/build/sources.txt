@@ -1,5 +1,5 @@
-src/main/java/com/university/scanner/ApiClient.java
-src/main/java/com/university/scanner/AppConfig.java
 src/main/java/com/university/scanner/Main.java
 src/main/java/com/university/scanner/Json.java
 src/main/java/com/university/scanner/ScannerFrame.java
+src/main/java/com/university/scanner/AppConfig.java
+src/main/java/com/university/scanner/ApiClient.java

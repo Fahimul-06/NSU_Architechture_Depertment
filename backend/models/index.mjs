@@ -89,6 +89,16 @@ export const AuthSession = make('AuthSession', {
   revokedAt: Date
 }, [[{ expiresAt: 1 }, { expireAfterSeconds: 0 }]]);
 
+export const AdminSession = make('AdminSession', {
+  id: { type: String, required: true, unique: true }, tokenHash: { type: String, required: true, unique: true },
+  email: { type: String, required: true, index: true }, expiresAt: { type: Date, required: true, index: true }, revokedAt: Date, lastUsedAt: Date
+}, [[{ expiresAt: 1 }, { expireAfterSeconds: 0 }]]);
+
+export const AuditLog = make('AuditLog', {
+  id: { type: String, required: true, unique: true }, actorType: String, actorId: String, action: String, targetType: String, targetId: String,
+  ip: String, userAgent: String, metadata: Object, createdAt: { type: Date, default: Date.now, index: true }
+}, [[{ createdAt: 1 }, { expireAfterSeconds: 31536000 }], [{ actorType: 1, actorId: 1, createdAt: -1 }, {}]]);
+
 export const Notification = make('Notification', {
   id: { type: String, required: true, unique: true },
   facultyId: { type: String, required: true, index: true },
@@ -103,4 +113,4 @@ export const Notification = make('Notification', {
   createdAt: { type: Date, default: Date.now, index: true }
 }, [[{ facultyId: 1, readAt: 1, createdAt: -1 }, {}]]);
 
-export const models = { Student, Faculty, Department, Service, ClassSchedule, ServiceHour, Appointment, ScanLog, PosSession, AuthSession, Notification };
+export const models = { Student, Faculty, Department, Service, ClassSchedule, ServiceHour, Appointment, ScanLog, PosSession, AuthSession, AdminSession, AuditLog, Notification };

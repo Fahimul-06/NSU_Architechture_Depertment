@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: nsu-architecture-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/readiness
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: true
+      - key: AUTO_SEED
+        value: false
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB_NAME
+        value: nsu_architecture_queue
+      - key: CORS_ORIGINS
+        sync: false
+      - key: DEVICE_API_KEY
+        generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DEFAULT_FACULTY_PASSWORD
+        sync: false
+  - type: web
+    name: nsu-architecture-faculty
+    runtime: static
+    rootDir: faculty-dashboard
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+  - type: web
+    name: nsu-architecture-admin
+    runtime: static
+    rootDir: admin-dashboard
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false

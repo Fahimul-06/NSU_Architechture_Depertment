@@ -16,13 +16,15 @@ public final class ApiClient {
     private final String baseUrl;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(5)).build();
     private final Gson gson = new Gson();
+    private final String deviceKey;
 
     public ApiClient() {
         this.baseUrl = System.getProperty("api.url", System.getenv().getOrDefault("UNIVERSITY_API_URL", "http://localhost:8080"));
+        this.deviceKey = System.getProperty("device.key", System.getenv().getOrDefault("UNIVERSITY_DEVICE_KEY", ""));
     }
 
     private HttpResponse<String> getResponse(String path) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path)).timeout(java.time.Duration.ofSeconds(10)).GET().build();
+        HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path)).timeout(java.time.Duration.ofSeconds(10)).header("X-Device-Key", deviceKey).GET().build();
         HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() < 200 || response.statusCode() >= 300) throw new IOException(error(response));
         return response;
@@ -34,7 +36,7 @@ public final class ApiClient {
 
     private String post(String path, Object body) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + path)).timeout(java.time.Duration.ofSeconds(10))
-                .header("Content-Type", "application/json")
+                .header("Content-Type", "application/json").header("X-Device-Key", deviceKey)
                 .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body))).build();
         HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() < 200 || response.statusCode() >= 300) throw new IOException(error(response));

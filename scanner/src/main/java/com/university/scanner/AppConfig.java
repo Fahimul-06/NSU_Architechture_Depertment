@@ -21,7 +21,7 @@ public final class AppConfig {
         return config;
     }
 
-    public boolean isConfigured() { return !get("backendUrl", "").isBlank() && !get("facultyId", "").isBlank(); }
+    public boolean isConfigured() { return !get("backendUrl", "").isBlank() && !get("facultyId", "").isBlank() && !get("deviceKey", "").isBlank(); }
 
     public String get(String key, String fallback) {
         String value = values.getProperty(key);
@@ -31,6 +31,7 @@ public final class AppConfig {
     public boolean configure(boolean allowCancel) {
         JTextField backend = new JTextField(get("backendUrl", "https://your-api.onrender.com"), 34);
         JTextField faculty = new JTextField(get("facultyId", "ARCH-FAC-001"), 34);
+        JPasswordField deviceKey = new JPasswordField(get("deviceKey", ""), 34);
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.add(new JLabel("Backend API URL:"));
@@ -41,6 +42,9 @@ public final class AppConfig {
         panel.add(new JLabel("Faculty / Professor ID for this scanner display:"));
         panel.add(faculty);
         panel.add(new JLabel("Example: ARCH-FAC-001"));
+        panel.add(Box.createVerticalStrut(10));
+        panel.add(new JLabel("Device API key:"));
+        panel.add(deviceKey);
         while (true) {
             int result = JOptionPane.showConfirmDialog(null, panel, "NSU Architecture Scanner Setup",
                     allowCancel ? JOptionPane.OK_CANCEL_OPTION : JOptionPane.OK_OPTION,
@@ -52,12 +56,18 @@ public final class AppConfig {
                 continue;
             }
             String facultyId = faculty.getText().trim();
+            String key = new String(deviceKey.getPassword()).trim();
+            if (key.length() < 32) {
+                JOptionPane.showMessageDialog(null, "Enter the 32+ character device key supplied by the administrator.", "Missing Device Key", JOptionPane.ERROR_MESSAGE);
+                continue;
+            }
             if (facultyId.isBlank()) {
                 JOptionPane.showMessageDialog(null, "Enter the faculty/professor ID for this scanner.", "Missing Faculty ID", JOptionPane.ERROR_MESSAGE);
                 continue;
             }
             values.setProperty("backendUrl", url);
             values.setProperty("facultyId", facultyId);
+            values.setProperty("deviceKey", key);
             try {
                 Files.createDirectories(DIR);
                 try (OutputStream out = Files.newOutputStream(FILE)) {
@@ -70,5 +80,5 @@ public final class AppConfig {
         }
     }
 
-    public void apply() { System.setProperty("api.url", get("backendUrl", "http://localhost:8080")); System.setProperty("faculty.id", get("facultyId", "ARCH-FAC-001")); }
+    public void apply() { System.setProperty("api.url", get("backendUrl", "http://localhost:8080")); System.setProperty("faculty.id", get("facultyId", "ARCH-FAC-001")); System.setProperty("device.key", get("deviceKey", "")); }
 }

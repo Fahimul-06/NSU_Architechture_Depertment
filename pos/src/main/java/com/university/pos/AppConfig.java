@@ -22,7 +22,7 @@ public final class AppConfig {
     }
 
     public boolean isConfigured() {
-        return !get("backendUrl", "").isBlank() && !get("terminalId", "").isBlank();
+        return !get("backendUrl", "").isBlank() && !get("terminalId", "").isBlank() && !get("deviceKey", "").isBlank();
     }
 
     public String get(String key, String fallback) {
@@ -33,6 +33,7 @@ public final class AppConfig {
     public boolean configure(boolean allowCancel) {
         JTextField backend = new JTextField(get("backendUrl", "https://your-api.onrender.com"), 34);
         JTextField terminal = new JTextField(get("terminalId", "POS-01"), 20);
+        JPasswordField deviceKey = new JPasswordField(get("deviceKey", ""), 34);
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.add(new JLabel("Backend API URL:"));
@@ -40,6 +41,9 @@ public final class AppConfig {
         panel.add(Box.createVerticalStrut(10));
         panel.add(new JLabel("POS terminal ID:"));
         panel.add(terminal);
+        panel.add(Box.createVerticalStrut(10));
+        panel.add(new JLabel("Device API key:"));
+        panel.add(deviceKey);
         panel.add(Box.createVerticalStrut(8));
         panel.add(new JLabel("Example: https://nsu-architecture-api.onrender.com"));
 
@@ -50,8 +54,13 @@ public final class AppConfig {
             if (result != JOptionPane.OK_OPTION) return false;
             String url = backend.getText().trim().replaceAll("/+$", "");
             String id = terminal.getText().trim().toUpperCase();
+            String key = new String(deviceKey.getPassword()).trim();
             if (!url.matches("https?://.+")) {
                 JOptionPane.showMessageDialog(null, "Enter a valid URL beginning with http:// or https://.", "Invalid URL", JOptionPane.ERROR_MESSAGE);
+                continue;
+            }
+            if (key.length() < 32) {
+                JOptionPane.showMessageDialog(null, "Enter the 32+ character device key supplied by the administrator.", "Invalid Device Key", JOptionPane.ERROR_MESSAGE);
                 continue;
             }
             if (id.isBlank()) {
@@ -60,6 +69,7 @@ public final class AppConfig {
             }
             values.setProperty("backendUrl", url);
             values.setProperty("terminalId", id);
+            values.setProperty("deviceKey", key);
             try {
                 Files.createDirectories(DIR);
                 try (OutputStream out = Files.newOutputStream(FILE)) {
@@ -75,5 +85,6 @@ public final class AppConfig {
     public void apply() {
         System.setProperty("api.url", get("backendUrl", "http://localhost:8080"));
         System.setProperty("terminal.id", get("terminalId", "POS-01"));
+        System.setProperty("device.key", get("deviceKey", ""));
     }
 }

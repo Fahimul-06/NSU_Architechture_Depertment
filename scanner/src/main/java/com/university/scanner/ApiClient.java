@@ -16,7 +16,8 @@ final class ApiClient {
                           String nextStudentName, String nextService, String nextStartTime, String nextEndTime) {}
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).build();
     private final String baseUrl;
-    ApiClient(String baseUrl) { this.baseUrl=baseUrl.replaceAll("/+$",""); }
+    private final String deviceKey;
+    ApiClient(String baseUrl) { this.baseUrl=baseUrl.replaceAll("/+$",""); this.deviceKey=System.getProperty("device.key", System.getenv().getOrDefault("UNIVERSITY_DEVICE_KEY", "")); }
     boolean health() throws Exception {
         var req=HttpRequest.newBuilder(URI.create(baseUrl+"/api/health")).timeout(Duration.ofSeconds(6)).GET().build();
         return client.send(req,HttpResponse.BodyHandlers.ofString()).statusCode()==200;
@@ -24,7 +25,7 @@ final class ApiClient {
     ScanResult scan(String qrPayload, String deviceName) throws Exception {
         String body="{\"qrPayload\":\""+Json.escape(qrPayload)+"\",\"deviceName\":\""+Json.escape(deviceName)+"\"}";
         var req=HttpRequest.newBuilder(URI.create(baseUrl+"/api/tickets/scan")).timeout(Duration.ofSeconds(10))
-                .header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build();
+                .header("Content-Type","application/json").header("X-Device-Key",deviceKey).POST(HttpRequest.BodyPublishers.ofString(body)).build();
         var response=client.send(req,HttpResponse.BodyHandlers.ofString());
         if(response.statusCode()!=200) throw new IllegalStateException("Server returned HTTP "+response.statusCode());
         String json=response.body(), a=Json.object(json,"appointment");
@@ -39,7 +40,7 @@ final class ApiClient {
     }
     StudentMessage studentMessage(String appointmentId) throws Exception {
         var req=HttpRequest.newBuilder(URI.create(baseUrl+"/api/appointments/"+appointmentId+"/student-message"))
-                .timeout(Duration.ofSeconds(8)).GET().build();
+                .timeout(Duration.ofSeconds(8)).header("X-Device-Key",deviceKey).GET().build();
         var response=client.send(req,HttpResponse.BodyHandlers.ofString());
         if(response.statusCode()!=200) throw new IllegalStateException("Server returned HTTP "+response.statusCode());
         String json=response.body();
@@ -53,7 +54,7 @@ final class ApiClient {
 
     CallDisplay callDisplay(String facultyId) throws Exception {
         var req=HttpRequest.newBuilder(URI.create(baseUrl+"/api/faculty/"+java.net.URLEncoder.encode(facultyId, java.nio.charset.StandardCharsets.UTF_8)+"/call-display"))
-                .timeout(Duration.ofSeconds(8)).GET().build();
+                .timeout(Duration.ofSeconds(8)).header("X-Device-Key",deviceKey).GET().build();
         var response=client.send(req,HttpResponse.BodyHandlers.ofString());
         if(response.statusCode()!=200) throw new IllegalStateException("Server returned HTTP "+response.statusCode());
         String json=response.body(), call=Json.object(json,"call");
@@ -64,7 +65,7 @@ final class ApiClient {
 
     private ScanResult sendScan(String endpoint, String body) throws Exception {
         var req=HttpRequest.newBuilder(URI.create(endpoint)).timeout(Duration.ofSeconds(10))
-                .header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build();
+                .header("Content-Type","application/json").header("X-Device-Key",deviceKey).POST(HttpRequest.BodyPublishers.ofString(body)).build();
         var response=client.send(req,HttpResponse.BodyHandlers.ofString());
         if(response.statusCode()!=200) throw new IllegalStateException("Server returned HTTP "+response.statusCode());
         String json=response.body(), a=Json.object(json,"appointment");
