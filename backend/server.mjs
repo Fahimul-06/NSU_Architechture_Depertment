@@ -46,11 +46,39 @@ async function requireFaculty(req,res,expectedFacultyId=null){
   if(expectedFacultyId&&faculty.id!==expectedFacultyId){json(res,403,{message:'You can only access your own faculty dashboard.'});return null;}
   return faculty;
 }
+const realtimeClients={faculty:new Map(),appointment:new Map()};
+function realtimeSet(kind,key){const map=realtimeClients[kind];if(!map.has(key))map.set(key,new Set());return map.get(key);}
+function sendRealtime(res,event,payload){
+  try{res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);return true;}catch{return false;}
+}
+function publishRealtime(kind,key,event,payload){
+  const set=realtimeClients[kind]?.get(String(key));if(!set)return;
+  for(const res of [...set])if(!sendRealtime(res,event,payload))set.delete(res);
+  if(set.size===0)realtimeClients[kind].delete(String(key));
+}
+function openRealtime(req,res,kind,key,initial={}){
+  res.writeHead(200,{
+    'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache, no-transform','Connection':'keep-alive',
+    'X-Accel-Buffering':'no','Access-Control-Allow-Origin':res.corsOrigin||'null','Vary':'Origin',
+    'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'
+  });
+  res.flushHeaders?.();
+  const set=realtimeSet(kind,String(key));set.add(res);
+  sendRealtime(res,'connected',{ok:true,kind,key:String(key),serverTime:new Date().toISOString(),...initial});
+  const heartbeat=setInterval(()=>{try{res.write(`: heartbeat ${Date.now()}\n\n`);}catch{}},20000);
+  const close=()=>{clearInterval(heartbeat);set.delete(res);if(set.size===0)realtimeClients[kind].delete(String(key));};
+  req.on('close',close);req.on('aborted',close);
+}
 async function notifyFaculty(a,type,title,message){
   if(!a?.facultyId)return;
-  await Notification.create({id:crypto.randomUUID(),facultyId:a.facultyId,type,title,message,appointmentId:a.id,token:a.token,studentId:a.studentId,studentName:a.studentName,createdAt:new Date()});
+  const notification=await Notification.create({id:crypto.randomUUID(),facultyId:a.facultyId,type,title,message,appointmentId:a.id,token:a.token,studentId:a.studentId,studentName:a.studentName,createdAt:new Date()});
+  publishRealtime('faculty',a.facultyId,'notification',plain(notification));
 }
-
+function publishAppointment(a,event='appointment-updated'){
+  const payload=appointmentDetails(a);
+  publishRealtime('appointment',a.id,event,payload);
+  if(a.facultyId)publishRealtime('faculty',a.facultyId,event,payload);
+}
 
 const loginAttempts=new Map();
 function clientIp(req){return TRUST_PROXY?String(req.headers['x-forwarded-for']||'').split(',')[0].trim():(req.socket.remoteAddress||'unknown');}
@@ -76,6 +104,7 @@ async function validateArrival(a,{deviceName='Faculty Office Scanner',method='QR
   Object.assign(a,{status:'CHECKED_IN',checkedInAt:now,scannerDevice:deviceName,checkInMethod:method,arrivalStatus:'WAITING_FOR_FACULTY',arrivalTiming:earlyArrival?'EARLY':'ON_TIME',facultyResponse:null,facultyResponseMessage:'Waiting for faculty response.',facultyRespondedAt:null});
   await a.save();
   await notifyFaculty(a,'STUDENT_ARRIVAL','Student at your door',`${a.studentName} (${a.studentId}), token ${a.token}, has arrived for ${a.service} at ${a.startTime}.`);
+  publishAppointment(a,'student-arrival');
   const reason=earlyArrival?'EARLY_ARRIVAL':'VALID';
   const message=earlyArrival
     ?`You arrived before your scheduled time (${a.startTime}-${a.endTime}). Your arrival was sent to the faculty. Please wait for WAIT or COME IN.`
@@ -126,7 +155,18 @@ async function handle(req,res){
   if(req.method==='OPTIONS')return json(res,204);
   const url=new URL(req.url,`http://${req.headers.host}`),p=url.pathname;
   if(p==='/api/readiness')return json(res,mongoose.connection.readyState===1?200:503,{ok:mongoose.connection.readyState===1,database:mongoose.connection.readyState===1?'connected':'disconnected'});
-  if(p==='/api/health')return json(res,200,{ok:true,version:'2.0.0-production',features:['arrival-alert','faculty-response','scanner-polling','next-student','faculty-call-display'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
+  if(p==='/api/health')return json(res,200,{ok:true,version:'2.2.0-event-stream',features:['authenticated-sse','arrival-alert','faculty-response','scanner-live-reply','next-student','faculty-call-display'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
+  if(p==='/api/realtime/faculty'&&req.method==='GET'){
+    const faculty=await requireFaculty(req,res);if(!faculty)return;
+    openRealtime(req,res,'faculty',faculty.id,{facultyId:faculty.id});return;
+  }
+  const appointmentStream=p.match(/^\/api\/realtime\/appointments\/([^/]+)$/);
+  if(appointmentStream&&req.method==='GET'){
+    if(!requireDevice(req,res))return;
+    const appointmentId=decodeURIComponent(appointmentStream[1]);
+    const a=await Appointment.findOne({id:appointmentId}).lean();if(!a)return json(res,404,{message:'Appointment not found.'});
+    openRealtime(req,res,'appointment',appointmentId,{appointmentId,status:a.status,facultyResponse:a.facultyResponse||null});return;
+  }
 
   if(p==='/api/auth/admin/login'&&req.method==='POST'){
     if(!allowLogin(req))return json(res,429,{message:'Too many login attempts. Try again later.'});
@@ -315,7 +355,7 @@ async function handle(req,res){
   if(arrivalResponseMatch&&req.method==='PUT'){
     const b=await readBody(req),response=String(b.response||'').toUpperCase();if(!['COME_IN','WAIT'].includes(response))return json(res,400,{message:'Response must be COME_IN or WAIT.'});
     const a=await Appointment.findOne({id:arrivalResponseMatch[1]});if(!a)return json(res,404,{message:'Appointment not found.'});const auth=await requireFaculty(req,res,a.facultyId);if(!auth)return;if(!a.checkedInAt)return json(res,409,{message:'Student has not checked in yet.'});
-    Object.assign(a,{facultyResponse:response,arrivalStatus:response==='COME_IN'?'COME_IN':'WAIT',facultyResponseMessage:response==='COME_IN'?'Please come in now.':'Please wait outside. The faculty will call you shortly.',facultyRespondedAt:new Date()});if(response==='COME_IN'){a.status='CALLED';a.calledAt=new Date();}await a.save();await notifyFaculty(a,response==='COME_IN'?'STUDENT_CALLED':'STUDENT_WAITING',response==='COME_IN'?'Student called':'Student asked to wait',`${a.token} — ${a.studentName} was told to ${response==='COME_IN'?'come in':'wait'}.`);return json(res,200,plain(a));
+    Object.assign(a,{facultyResponse:response,arrivalStatus:response==='COME_IN'?'COME_IN':'WAIT',facultyResponseMessage:response==='COME_IN'?'Please come in now.':'Please wait outside. The faculty will call you shortly.',facultyRespondedAt:new Date()});if(response==='COME_IN'){a.status='CALLED';a.calledAt=new Date();}await a.save();await notifyFaculty(a,response==='COME_IN'?'STUDENT_CALLED':'STUDENT_WAITING',response==='COME_IN'?'Student called':'Student asked to wait',`${a.token} — ${a.studentName} was told to ${response==='COME_IN'?'come in':'wait'}.`);publishAppointment(a,'faculty-response');return json(res,200,plain(a));
   }
   const studentMessageMatch=p.match(/^\/api\/appointments\/([^/]+)\/student-message$/);
   if(studentMessageMatch&&req.method==='GET'){
@@ -360,6 +400,7 @@ async function handle(req,res){
     if(status==='CALLED') Object.assign(update,{calledAt:new Date(),facultyResponse:'COME_IN',arrivalStatus:'COME_IN',facultyResponseMessage:'Please come in now.',facultyRespondedAt:new Date()});
     Object.assign(existing,update);await existing.save();
     await notifyFaculty(existing,`STATUS_${status}`,'Queue status updated',`${existing.token} — ${existing.studentName} is now ${status.replaceAll('_',' ').toLowerCase()}.`);
+    publishAppointment(existing,'status-changed');
     return json(res,200,plain(existing));
   }
 

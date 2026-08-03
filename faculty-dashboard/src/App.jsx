@@ -6,7 +6,7 @@ import {
   PauseCircle, UserRoundX
 } from 'lucide-react';
 import Modal from './components/Modal';
-import { api, authStore } from './api';
+import { api, authStore, openFacultyEventStream } from './api';
 import { formatTime } from './utils/time';
 
 const navItems = [
@@ -40,6 +40,7 @@ function Dashboard({ faculty, onLogout }) {
   const [classSchedule, setClassSchedule] = useState([]);
   const [serviceHours, setServiceHours] = useState([]);
   const [connectionError, setConnectionError] = useState('');
+  const [liveState, setLiveState] = useState('connecting');
   const [query, setQuery] = useState('');
   const [modal, setModal] = useState(null);
   const [queuePaused, setQueuePaused] = useState(false);
@@ -64,8 +65,27 @@ function Dashboard({ faculty, onLogout }) {
     if (!facultyId) return;
     setArrivalNotice(null);
     loadAll();
-    const timer = setInterval(loadAll, 2000);
-    return () => clearInterval(timer);
+    const closeStream = openFacultyEventStream(({type, data}) => {
+      if (type === 'student-arrival') {
+        setAppointments(items => {
+          const exists = items.some(item => item.id === data.id);
+          return exists ? items.map(item => item.id === data.id ? data : item) : [data, ...items];
+        });
+        setArrivalNotice(data);
+      } else if (['faculty-response','status-changed','appointment-updated'].includes(type)) {
+        setAppointments(items => items.map(item => item.id === data.id ? data : item));
+        if (data.arrivalStatus !== 'WAITING_FOR_FACULTY') setArrivalNotice(current => current?.id === data.id ? null : current);
+      } else if (type === 'notification') {
+        setNotifications(items => [data, ...items.filter(item => item.id !== data.id)]);
+        setUnreadCount(count => count + (data.readAt ? 0 : 1));
+      }
+    }, (state, error) => {
+      setLiveState(state);
+      if (state === 'connected') setConnectionError('');
+      else if (error) setConnectionError(error.message);
+    });
+    const fallback = setInterval(loadAll, 15000);
+    return () => { closeStream(); clearInterval(fallback); };
   }, [facultyId]);
 
   const filteredAppointments = useMemo(() => {
@@ -170,28 +190,32 @@ function Dashboard({ faculty, onLogout }) {
         <header className="topbar">
           <button className="menu-button" onClick={() => setSidebarOpen(v => !v)}><Menu/></button>
           <div><h1>{navItems.find(x => x[0] === page)?.[1]}</h1><p>{new Date().toLocaleDateString(undefined, {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p></div>
-          <div className="top-actions"><div className="notification-wrap"><button className="icon-button" onClick={() => setNotificationsOpen(v => !v)} aria-label="Notifications"><Bell size={20}/>{unreadCount > 0 && <span className="notification-count">{unreadCount > 99 ? "99+" : unreadCount}</span>}</button>{notificationsOpen && <div className="notification-panel"><div className="notification-header"><div><strong>Notifications</strong><span>{unreadCount} unread</span></div><button onClick={markAllRead}>Mark all read</button></div><div className="notification-list">{notifications.length ? notifications.map(item => <button key={item.id} className={`notification-item ${item.readAt ? "" : "unread"}`} onClick={() => openNotification(item)}><span className="notification-type">{item.title}</span><strong>{item.token || "Queue update"}</strong><p>{item.message}</p><small>{new Date(item.createdAt).toLocaleString()}</small></button>) : <div className="notification-empty">No notifications yet.</div>}</div></div>}</div><div className="top-profile"><div className="avatar small">{selectedFaculty?.name?.split(/\s+/).map(x => x[0]).join('').slice(0,2).toUpperCase() || 'AF'}</div><span>{selectedFaculty?.name || 'Select faculty'}</span></div></div>
+          <div className="top-actions"><span className={`live-pill live-${liveState}`}>{liveState === 'connected' ? '● LIVE' : liveState === 'connecting' ? '● CONNECTING' : '● RECONNECTING'}</span><div className="notification-wrap"><button className="icon-button" onClick={() => setNotificationsOpen(v => !v)} aria-label="Notifications"><Bell size={20}/>{unreadCount > 0 && <span className="notification-count">{unreadCount > 99 ? "99+" : unreadCount}</span>}</button>{notificationsOpen && <div className="notification-panel"><div className="notification-header"><div><strong>Notifications</strong><span>{unreadCount} unread</span></div><button onClick={markAllRead}>Mark all read</button></div><div className="notification-list">{notifications.length ? notifications.map(item => <button key={item.id} className={`notification-item ${item.readAt ? "" : "unread"}`} onClick={() => openNotification(item)}><span className="notification-type">{item.title}</span><strong>{item.token || "Queue update"}</strong><p>{item.message}</p><small>{new Date(item.createdAt).toLocaleString()}</small></button>) : <div className="notification-empty">No notifications yet.</div>}</div></div>}</div><div className="top-profile"><div className="avatar small">{selectedFaculty?.name?.split(/\s+/).map(x => x[0]).join('').slice(0,2).toUpperCase() || 'AF'}</div><span>{selectedFaculty?.name || 'Select faculty'}</span></div></div>
         </header>
 
         <section className="content">
 
-          {arrivalNotice && <div className="arrival-alert">
-            <div className="arrival-icon"><Bell size={28}/></div>
-            <div className="arrival-copy">
-              <p className="eyebrow">STUDENT AT YOUR DOOR</p>
-              <h2>{arrivalNotice.studentName}</h2>
-              <p><strong>{arrivalNotice.studentId}</strong> · Token {arrivalNotice.token}</p>
-              <p>{arrivalNotice.service}</p>
-              <p><strong>Booking:</strong> {arrivalNotice.date} · {formatTime(arrivalNotice.startTime)}–{formatTime(arrivalNotice.endTime)}</p>
-            </div>
-            <div className="arrival-actions">
-              <button className="secondary" onClick={() => respondToArrival(arrivalNotice, 'WAIT')}><PauseCircle size={18}/> Please Wait</button>
-              <button className="success" onClick={() => respondToArrival(arrivalNotice, 'COME_IN')}><UserCheck size={18}/> Come In</button>
+          {arrivalNotice && <div className="arrival-overlay" role="alertdialog" aria-live="assertive">
+            <div className="arrival-screen">
+              <div className="arrival-icon"><Bell size={42}/></div>
+              <p className="eyebrow">LIVE ARRIVAL ALERT</p>
+              <h1>STUDENT AT YOUR DOOR</h1>
+              <div className="arrival-ticket">
+                <div><span>Token</span><strong>{arrivalNotice.token}</strong></div>
+                <div><span>Student Name</span><strong>{arrivalNotice.studentName}</strong></div>
+                <div><span>Student ID</span><strong>{arrivalNotice.studentId}</strong></div>
+                <div><span>Service</span><strong>{arrivalNotice.service}</strong></div>
+                <div><span>Booking</span><strong>{arrivalNotice.date} · {formatTime(arrivalNotice.startTime)}–{formatTime(arrivalNotice.endTime)}</strong></div>
+              </div>
+              <div className="arrival-actions large">
+                <button className="secondary" onClick={() => respondToArrival(arrivalNotice, 'WAIT')}><PauseCircle size={24}/> WAIT</button>
+                <button className="success" onClick={() => respondToArrival(arrivalNotice, 'COME_IN')}><UserCheck size={24}/> COME IN</button>
+              </div>
             </div>
           </div>}
           {connectionError && <div className="welcome-card"><div><p className="eyebrow">SERVER OFFLINE</p><h2>Dashboard cannot reach the shared API</h2><p>Start the backend on port 8080. {connectionError}</p></div><button className="primary" onClick={loadAll}>Retry</button></div>}
           {page === 'dashboard' && <>
-            <div className="welcome-card"><div><p className="eyebrow">GOOD MORNING</p><h2>Manage today’s student service queue</h2><p>New POS tickets appear here automatically within three seconds.</p></div><button className={queuePaused ? 'primary' : 'secondary'} onClick={() => setQueuePaused(v => !v)}>{queuePaused ? <RefreshCw size={18}/> : <PauseCircle size={18}/>} {queuePaused ? 'Resume Queue' : 'Pause Queue'}</button></div>
+            <div className="welcome-card"><div><p className="eyebrow">GOOD MORNING</p><h2>Manage today’s student service queue</h2><p>Student arrivals and faculty replies update instantly through the live event stream.</p></div><button className={queuePaused ? 'primary' : 'secondary'} onClick={() => setQueuePaused(v => !v)}>{queuePaused ? <RefreshCw size={18}/> : <PauseCircle size={18}/>} {queuePaused ? 'Resume Queue' : 'Pause Queue'}</button></div>
             <div className="stats-grid"><StatCard label="Today’s appointments" value={metrics.total} hint="All scheduled students"/><StatCard label="Waiting" value={metrics.waiting} hint="Checked in or called"/><StatCard label="Completed" value={metrics.completed} hint="Finished services"/><StatCard label="Upcoming" value={metrics.upcoming} hint="Not checked in yet"/></div>
             <div className="panel">
               <div className="panel-header"><div><h3>Today’s queue</h3><p>Live appointment overview</p></div><button className="text-button" onClick={() => setPage('queue')}>View all <ChevronRight size={17}/></button></div>

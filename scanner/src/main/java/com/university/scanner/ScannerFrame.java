@@ -18,6 +18,7 @@ final class ScannerFrame extends JFrame {
     private final String facultyId;
     private String lastCallAppointmentId="";
     private Timer facultyPollTimer;
+    private AutoCloseable appointmentStream;
     private String waitingAppointmentId;
     private String waitingDetails;
 
@@ -29,7 +30,7 @@ final class ScannerFrame extends JFrame {
         setDefaultCloseOperation(EXIT_ON_CLOSE); setMinimumSize(new Dimension(940,680)); setLocationRelativeTo(null);
         setContentPane(build());
         new Timer(5000,e->checkHealth()).start(); checkHealth();
-        Timer callDisplayTimer=new Timer(2000,e->pollCallDisplay()); callDisplayTimer.setInitialDelay(1200); callDisplayTimer.start();
+        Timer callDisplayTimer=new Timer(750,e->pollCallDisplay()); callDisplayTimer.setInitialDelay(1200); callDisplayTimer.start();
         SwingUtilities.invokeLater(codeField::requestFocusInWindow);
     }
     private JComponent build() {
@@ -69,8 +70,12 @@ final class ScannerFrame extends JFrame {
     }
     private void startFacultyPolling(String appointmentId) {
         waitingAppointmentId=appointmentId;
-        facultyPollTimer=new Timer(2000,e->pollFacultyResponse());
-        facultyPollTimer.setInitialDelay(1000);
+        try {
+            appointmentStream=api.streamAppointment(appointmentId,(event,data)->SwingUtilities.invokeLater(this::pollFacultyResponse),
+                    error->SwingUtilities.invokeLater(()->resultMessage.setText("Live connection retrying; fallback polling remains active.")));
+        } catch(Exception ignored) {}
+        facultyPollTimer=new Timer(5000,e->pollFacultyResponse());
+        facultyPollTimer.setInitialDelay(300);
         facultyPollTimer.start();
     }
     private void pollFacultyResponse() {
@@ -112,7 +117,7 @@ final class ScannerFrame extends JFrame {
             }
         }.execute();
     }
-    private void stopFacultyPolling(){if(facultyPollTimer!=null){facultyPollTimer.stop();facultyPollTimer=null;}waitingAppointmentId=null;}
+    private void stopFacultyPolling(){if(facultyPollTimer!=null){facultyPollTimer.stop();facultyPollTimer=null;}if(appointmentStream!=null){try{appointmentStream.close();}catch(Exception ignored){}appointmentStream=null;}waitingAppointmentId=null;}
 
     private void pollCallDisplay() {
         new SwingWorker<ApiClient.CallDisplay,Void>(){
