@@ -1,6 +1,6 @@
 {
   "name": "nsu-architecture-queue-backend",
-  "version": "2.1.0-realtime-arrival",
+  "version": "2.0.0-production",
   "private": true,
   "type": "module",
   "scripts": {

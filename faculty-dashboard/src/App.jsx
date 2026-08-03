@@ -64,7 +64,7 @@ function Dashboard({ faculty, onLogout }) {
     if (!facultyId) return;
     setArrivalNotice(null);
     loadAll();
-    const timer = setInterval(loadAll, 750);
+    const timer = setInterval(loadAll, 2000);
     return () => clearInterval(timer);
   }, [facultyId]);
 
@@ -175,22 +175,18 @@ function Dashboard({ faculty, onLogout }) {
 
         <section className="content">
 
-          {arrivalNotice && <div className="arrival-overlay" role="alertdialog" aria-live="assertive">
-            <div className="arrival-screen">
-              <div className="arrival-icon"><Bell size={42}/></div>
-              <p className="eyebrow">LIVE ARRIVAL ALERT</p>
-              <h1>STUDENT AT YOUR DOOR</h1>
-              <div className="arrival-ticket">
-                <div><span>Token</span><strong>{arrivalNotice.token}</strong></div>
-                <div><span>Student Name</span><strong>{arrivalNotice.studentName}</strong></div>
-                <div><span>Student ID</span><strong>{arrivalNotice.studentId}</strong></div>
-                <div><span>Service</span><strong>{arrivalNotice.service}</strong></div>
-                <div><span>Booking</span><strong>{arrivalNotice.date} · {formatTime(arrivalNotice.startTime)}–{formatTime(arrivalNotice.endTime)}</strong></div>
-              </div>
-              <div className="arrival-actions large">
-                <button className="secondary" onClick={() => respondToArrival(arrivalNotice, 'WAIT')}><PauseCircle size={24}/> WAIT</button>
-                <button className="success" onClick={() => respondToArrival(arrivalNotice, 'COME_IN')}><UserCheck size={24}/> COME IN</button>
-              </div>
+          {arrivalNotice && <div className="arrival-alert">
+            <div className="arrival-icon"><Bell size={28}/></div>
+            <div className="arrival-copy">
+              <p className="eyebrow">STUDENT AT YOUR DOOR</p>
+              <h2>{arrivalNotice.studentName}</h2>
+              <p><strong>{arrivalNotice.studentId}</strong> · Token {arrivalNotice.token}</p>
+              <p>{arrivalNotice.service}</p>
+              <p><strong>Booking:</strong> {arrivalNotice.date} · {formatTime(arrivalNotice.startTime)}–{formatTime(arrivalNotice.endTime)}</p>
+            </div>
+            <div className="arrival-actions">
+              <button className="secondary" onClick={() => respondToArrival(arrivalNotice, 'WAIT')}><PauseCircle size={18}/> Please Wait</button>
+              <button className="success" onClick={() => respondToArrival(arrivalNotice, 'COME_IN')}><UserCheck size={18}/> Come In</button>
             </div>
           </div>}
           {connectionError && <div className="welcome-card"><div><p className="eyebrow">SERVER OFFLINE</p><h2>Dashboard cannot reach the shared API</h2><p>Start the backend on port 8080. {connectionError}</p></div><button className="primary" onClick={loadAll}>Retry</button></div>}

@@ -126,7 +126,7 @@ async function handle(req,res){
   if(req.method==='OPTIONS')return json(res,204);
   const url=new URL(req.url,`http://${req.headers.host}`),p=url.pathname;
   if(p==='/api/readiness')return json(res,mongoose.connection.readyState===1?200:503,{ok:mongoose.connection.readyState===1,database:mongoose.connection.readyState===1?'connected':'disconnected'});
-  if(p==='/api/health')return json(res,200,{ok:true,version:'2.1.0-realtime-arrival',features:['arrival-alert','faculty-response','scanner-polling','next-student','faculty-call-display'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
+  if(p==='/api/health')return json(res,200,{ok:true,version:'2.0.0-production',features:['arrival-alert','faculty-response','scanner-polling','next-student','faculty-call-display'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
 
   if(p==='/api/auth/admin/login'&&req.method==='POST'){
     if(!allowLogin(req))return json(res,429,{message:'Too many login attempts. Try again later.'});
