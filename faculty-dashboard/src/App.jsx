@@ -51,7 +51,7 @@ export default function App() {
     try {
       const [a, s, c, h] = await Promise.all([api.appointments(facultyId), api.services(facultyId), api.classSchedule(facultyId), api.serviceHours(facultyId)]);
       setAppointments(a); setServices(s); setClassSchedule(c); setServiceHours(h); setConnectionError('');
-      const pendingArrival = a.find(item => item.status === 'CHECKED_IN' && item.arrivalStatus === 'WAITING_FOR_FACULTY' && !seenArrivals.current.has(item.id));
+      const pendingArrival = a.find(item => item.arrivalStatus === 'WAITING_FOR_FACULTY' && (item.checkedInAt || item.earlyArrivalAt) && !seenArrivals.current.has(item.id));
       if (pendingArrival) {
         setArrivalNotice(pendingArrival);
         seenArrivals.current.add(pendingArrival.id);
@@ -171,6 +171,7 @@ export default function App() {
               <h2>{arrivalNotice.studentName}</h2>
               <p><strong>{arrivalNotice.studentId}</strong> · Token {arrivalNotice.token}</p>
               <p>{arrivalNotice.service}</p>
+              {arrivalNotice.earlyArrivalAt && !arrivalNotice.checkedInAt && <p><strong>Early arrival:</strong> Student arrived before the 5-minute check-in window.</p>}
               <p><strong>Booking:</strong> {arrivalNotice.date} · {formatTime(arrivalNotice.startTime)}–{formatTime(arrivalNotice.endTime)}</p>
             </div>
             <div className="arrival-actions">

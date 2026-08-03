@@ -26,10 +26,17 @@ async function validateArrival(a,{deviceName='Faculty Office Scanner',method='QR
   const reject=(reason,message)=>({accepted:false,reason,message,appointment:appointmentDetails(a),scannedAt:new Date().toISOString()});
   if(['CANCELLED','ABSENT','COMPLETED','EXPIRED'].includes(a.status))return reject('INVALID_STATUS',`This appointment is ${a.status.toLowerCase()}.`);
   if(['CHECKED_IN','IN_SERVICE','CALLED'].includes(a.status)||a.checkedInAt)return reject('ALREADY_USED','This appointment has already been checked in.');
-  if(a.date>nowInfo.date)return reject('TOO_EARLY',`Your appointment is on ${a.date} at ${a.startTime}. Please arrive 5 minutes before your scheduled time.`);
+  const markEarlyArrival=async(message)=>{
+    const now=new Date();
+    Object.assign(a,{earlyArrivalAt:now,scannerDevice:deviceName,checkInMethod:method,arrivalStatus:'WAITING_FOR_FACULTY',facultyResponse:null,facultyResponseMessage:'Waiting for faculty response.',facultyRespondedAt:null});
+    await a.save();
+    await ScanLog.create({id:crypto.randomUUID(),appointmentId:a.id,token:a.token,result:'EARLY_ARRIVAL',reason:'TOO_EARLY',deviceName,scannedAt:now,method});
+    return{accepted:false,reason:'TOO_EARLY',message,appointment:appointmentDetails(a),scannedAt:now.toISOString(),facultyNotified:true};
+  };
+  if(a.date>nowInfo.date)return markEarlyArrival(`Your appointment is on ${a.date} at ${a.startTime}. Please arrive 5 minutes before your scheduled time. The faculty has been notified that you are here.`);
   if(a.date<nowInfo.date)return reject('EXPIRED',`This appointment expired on ${a.date}.`);
   const start=minutes(a.startTime),end=minutes(a.endTime),openAt=start-5;
-  if(nowInfo.minutes<openAt)return reject('TOO_EARLY',`Your appointment is at ${a.startTime}. Please arrive 5 minutes before your scheduled time.`);
+  if(nowInfo.minutes<openAt)return markEarlyArrival(`Your appointment is at ${a.startTime}. Please arrive 5 minutes before your scheduled time. The faculty has been notified that you are here.`);
   if(nowInfo.minutes>end)return reject('MISSED_TIME',`The appointment window ended at ${a.endTime}. Please contact the department office.`);
   const now=new Date();
   Object.assign(a,{status:'CHECKED_IN',checkedInAt:now,scannerDevice:deviceName,checkInMethod:method,arrivalStatus:'WAITING_FOR_FACULTY',facultyResponse:null,facultyResponseMessage:'Waiting for faculty response.',facultyRespondedAt:null});
@@ -212,7 +219,7 @@ async function handle(req,res){
   const arrivalResponseMatch=p.match(/^\/api\/appointments\/([^/]+)\/arrival-response$/);
   if(arrivalResponseMatch&&req.method==='PUT'){
     const b=await readBody(req),response=String(b.response||'').toUpperCase();if(!['COME_IN','WAIT'].includes(response))return json(res,400,{message:'Response must be COME_IN or WAIT.'});
-    const a=await Appointment.findOne({id:arrivalResponseMatch[1]});if(!a)return json(res,404,{message:'Appointment not found.'});if(!a.checkedInAt)return json(res,409,{message:'Student has not checked in yet.'});
+    const a=await Appointment.findOne({id:arrivalResponseMatch[1]});if(!a)return json(res,404,{message:'Appointment not found.'});if(!a.checkedInAt&&!a.earlyArrivalAt)return json(res,409,{message:'Student has not arrived yet.'});
     Object.assign(a,{facultyResponse:response,arrivalStatus:response==='COME_IN'?'COME_IN':'WAIT',facultyResponseMessage:response==='COME_IN'?'Please come in now.':'Please wait outside. The faculty will call you shortly.',facultyRespondedAt:new Date()});if(response==='COME_IN')a.status='CALLED';await a.save();return json(res,200,plain(a));
   }
   const studentMessageMatch=p.match(/^\/api\/appointments\/([^/]+)\/student-message$/);
