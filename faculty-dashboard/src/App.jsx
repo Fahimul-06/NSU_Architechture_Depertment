@@ -33,7 +33,8 @@ function EmptyState({ text }) {
 export default function App() {
   const [page, setPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const facultyId = 'ARCH-FAC-001';
+  const [faculties, setFaculties] = useState([]);
+  const [facultyId, setFacultyId] = useState(() => localStorage.getItem('nsuFacultyId') || '');
   const [appointments, setAppointments] = useState([]);
   const [services, setServices] = useState([]);
   const [classSchedule, setClassSchedule] = useState([]);
@@ -44,26 +45,40 @@ export default function App() {
   const [queuePaused, setQueuePaused] = useState(false);
   const [selected, setSelected] = useState(null);
   const [arrivalNotice, setArrivalNotice] = useState(null);
-  const seenArrivals = useRef(new Set());
 
-
-  const loadAll = async () => {
+  const loadFacultyDirectory = async () => {
     try {
-      const [a, s, c, h] = await Promise.all([api.appointments(facultyId), api.services(facultyId), api.classSchedule(facultyId), api.serviceHours(facultyId)]);
-      setAppointments(a); setServices(s); setClassSchedule(c); setServiceHours(h); setConnectionError('');
-      const pendingArrival = a.find(item => item.arrivalStatus === 'WAITING_FOR_FACULTY' && (item.checkedInAt || item.earlyArrivalAt) && !seenArrivals.current.has(item.id));
-      if (pendingArrival) {
-        setArrivalNotice(pendingArrival);
-        seenArrivals.current.add(pendingArrival.id);
+      const list = (await api.faculties()).filter(item => item.status === 'ACTIVE');
+      setFaculties(list);
+      if (!facultyId && list.length) {
+        const saved = localStorage.getItem('nsuFacultyId');
+        const selectedId = list.some(item => item.id === saved) ? saved : list[0].id;
+        setFacultyId(selectedId);
+        localStorage.setItem('nsuFacultyId', selectedId);
       }
     } catch (error) { setConnectionError(error.message); }
   };
 
+  const loadAll = async () => {
+    if (!facultyId) return;
+    try {
+      const [a, s, c, h] = await Promise.all([api.appointments(facultyId), api.services(facultyId), api.classSchedule(facultyId), api.serviceHours(facultyId)]);
+      setAppointments(a); setServices(s); setClassSchedule(c); setServiceHours(h); setConnectionError('');
+      const pendingArrival = a.find(item => item.arrivalStatus === 'WAITING_FOR_FACULTY' && (item.checkedInAt || item.earlyArrivalAt));
+      setArrivalNotice(pendingArrival || null);
+    } catch (error) { setConnectionError(error.message); }
+  };
+
+  useEffect(() => { loadFacultyDirectory(); }, []);
+
   useEffect(() => {
+    if (!facultyId) return undefined;
+    localStorage.setItem('nsuFacultyId', facultyId);
+    setArrivalNotice(null);
     loadAll();
-    const timer = setInterval(loadAll, 3000);
+    const timer = setInterval(loadAll, 2000);
     return () => clearInterval(timer);
-  }, []);
+  }, [facultyId]);
 
   const filteredAppointments = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -159,7 +174,7 @@ export default function App() {
         <header className="topbar">
           <button className="menu-button" onClick={() => setSidebarOpen(v => !v)}><Menu/></button>
           <div><h1>{navItems.find(x => x[0] === page)?.[1]}</h1><p>{new Date().toLocaleDateString(undefined, {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p></div>
-          <div className="top-actions"><button className="icon-button"><Bell size={20}/><span className="notification-dot"/></button><div className="top-profile"><div className="avatar small">AF</div><span>Architecture Faculty One</span></div></div>
+          <div className="top-actions"><button className="icon-button"><Bell size={20}/><span className="notification-dot"/></button><label className="faculty-selector"><span>Faculty</span><select value={facultyId} onChange={e => setFacultyId(e.target.value)}>{faculties.map(f => <option key={f.id} value={f.id}>{f.name} · {f.officeRoom || 'No room'}</option>)}</select></label></div>
         </header>
 
         <section className="content">

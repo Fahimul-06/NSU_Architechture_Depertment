@@ -224,7 +224,7 @@ async function handle(req,res){
   }
   const studentMessageMatch=p.match(/^\/api\/appointments\/([^/]+)\/student-message$/);
   if(studentMessageMatch&&req.method==='GET'){
-    const a=await Appointment.findOne({id:studentMessageMatch[1]}).lean();if(!a)return json(res,404,{message:'Appointment not found.'});return json(res,200,{appointmentId:a.id,token:a.token,arrivalStatus:a.arrivalStatus||null,facultyResponse:a.facultyResponse||null,message:a.facultyResponseMessage||'Waiting for faculty response.',facultyRespondedAt:a.facultyRespondedAt||null,status:a.status});
+    const a=await Appointment.findOne({id:studentMessageMatch[1]}).lean();if(!a)return json(res,404,{message:'Appointment not found.'});return json(res,200,{appointmentId:a.id,token:a.token,studentName:a.studentName||'',studentId:a.studentId||'',facultyName:a.facultyName||'',service:a.service||'',date:a.date||'',startTime:a.startTime||'',endTime:a.endTime||'',arrivalStatus:a.arrivalStatus||null,facultyResponse:a.facultyResponse||null,message:a.facultyResponseMessage||'Waiting for faculty response.',facultyRespondedAt:a.facultyRespondedAt||null,status:a.status});
   }
   if(p==='/api/tickets/scan-logs'&&req.method==='GET')return json(res,200,await ScanLog.find().sort({scannedAt:-1}).limit(1000).lean());
   const appointmentMatch=p.match(/^\/api\/appointments\/([^/]+)\/status$/);

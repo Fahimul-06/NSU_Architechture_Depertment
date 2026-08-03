@@ -9,3 +9,5 @@
 .arrival-actions { display:flex; gap:10px; flex-wrap:wrap; }
 @keyframes arrivalPulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.012); } }
 @media (max-width:760px) { .arrival-alert { align-items:flex-start; flex-direction:column; } .arrival-actions { width:100%; } .arrival-actions button { flex:1; } }
+
+.faculty-selector{display:flex;flex-direction:column;gap:3px;font-size:11px;color:#64748b}.faculty-selector select{min-width:260px;border:1px solid #cbd5e1;border-radius:10px;padding:9px 11px;background:white;color:#0f172a;font-weight:600}@media(max-width:760px){.faculty-selector select{min-width:170px;max-width:210px}}

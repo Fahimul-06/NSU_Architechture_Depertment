@@ -6,6 +6,7 @@ const request = async (path, options = {}) => {
   return data;
 };
 export const api = {
+  faculties: () => request('/api/faculties'),
   appointments: facultyId => request(`/api/appointments?facultyId=${facultyId}`),
   updateStatus: (id,status) => request(`/api/appointments/${id}/status`, {method:'PUT',body:JSON.stringify({status})}),
   arrivalResponse: (id,response) => request(`/api/appointments/${id}/arrival-response`, {method:'PUT',body:JSON.stringify({response})}),
