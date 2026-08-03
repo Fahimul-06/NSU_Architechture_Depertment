@@ -79,7 +79,7 @@ async function allocateSlot(facultyId,service){
 async function handle(req,res){
   if(req.method==='OPTIONS')return json(res,204);
   const url=new URL(req.url,`http://${req.headers.host}`),p=url.pathname;
-  if(p==='/api/health')return json(res,200,{ok:true,database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
+  if(p==='/api/health')return json(res,200,{ok:true,version:'1.3.1-message-fix',features:['arrival-alert','faculty-response','scanner-polling','next-student'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
 
   if(p==='/api/students/by-nfc'&&req.method==='GET'){
     const rawUid=url.searchParams.get('uid'),uid=normalizeUid(rawUid);

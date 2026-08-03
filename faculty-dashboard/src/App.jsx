@@ -33,7 +33,8 @@ function EmptyState({ text }) {
 export default function App() {
   const [page, setPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const facultyId = 'ARCH-FAC-001';
+  const [faculties, setFaculties] = useState([]);
+  const [facultyId, setFacultyId] = useState('');
   const [appointments, setAppointments] = useState([]);
   const [services, setServices] = useState([]);
   const [classSchedule, setClassSchedule] = useState([]);
@@ -44,26 +45,41 @@ export default function App() {
   const [queuePaused, setQueuePaused] = useState(false);
   const [selected, setSelected] = useState(null);
   const [arrivalNotice, setArrivalNotice] = useState(null);
-  const seenArrivals = useRef(new Set());
-
+  const selectedFaculty = useMemo(() => faculties.find(f => f.id === facultyId) || null, [faculties, facultyId]);
 
   const loadAll = async () => {
+    if (!facultyId) return;
     try {
       const [a, s, c, h] = await Promise.all([api.appointments(facultyId), api.services(facultyId), api.classSchedule(facultyId), api.serviceHours(facultyId)]);
       setAppointments(a); setServices(s); setClassSchedule(c); setServiceHours(h); setConnectionError('');
-      const pendingArrival = a.find(item => item.status === 'CHECKED_IN' && item.arrivalStatus === 'WAITING_FOR_FACULTY' && !seenArrivals.current.has(item.id));
-      if (pendingArrival) {
-        setArrivalNotice(pendingArrival);
-        seenArrivals.current.add(pendingArrival.id);
-      }
+      const pendingArrival = a.find(item => item.status === 'CHECKED_IN' && item.arrivalStatus === 'WAITING_FOR_FACULTY');
+      setArrivalNotice(pendingArrival || null);
     } catch (error) { setConnectionError(error.message); }
   };
 
   useEffect(() => {
-    loadAll();
-    const timer = setInterval(loadAll, 3000);
-    return () => clearInterval(timer);
+    let active = true;
+    api.faculties().then(items => {
+      if (!active) return;
+      const available = items.filter(item => String(item.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
+      setFaculties(available);
+      const urlFaculty = new URLSearchParams(window.location.search).get('facultyId');
+      const savedFaculty = localStorage.getItem('nsuArchitectureFacultyId');
+      const preferred = urlFaculty || savedFaculty || import.meta.env.VITE_FACULTY_ID;
+      const selected = available.find(item => item.id === preferred) || available[0];
+      if (selected) setFacultyId(selected.id);
+    }).catch(error => setConnectionError(error.message));
+    return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!facultyId) return;
+    localStorage.setItem('nsuArchitectureFacultyId', facultyId);
+    setArrivalNotice(null);
+    loadAll();
+    const timer = setInterval(loadAll, 2000);
+    return () => clearInterval(timer);
+  }, [facultyId]);
 
   const filteredAppointments = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -151,7 +167,7 @@ export default function App() {
         <nav>
           {navItems.map(([id, label, Icon]) => <button key={id} className={page === id ? 'active' : ''} onClick={() => {setPage(id); setSidebarOpen(false)}}><Icon size={20}/><span>{label}</span></button>)}
         </nav>
-        <div className="faculty-card"><div className="avatar">AF</div><div><strong>Architecture Faculty One</strong><span>Professor · NSU Architecture</span></div></div>
+        <div className="faculty-card"><div className="avatar">{selectedFaculty?.name?.split(/\s+/).map(x => x[0]).join('').slice(0,2).toUpperCase() || 'AF'}</div><div><strong>{selectedFaculty?.name || 'Select faculty'}</strong><span>{selectedFaculty?.designation || 'NSU Architecture'}</span></div></div>
         <button className="logout"><LogOut size={19}/> Sign out</button>
       </aside>
 
@@ -159,7 +175,7 @@ export default function App() {
         <header className="topbar">
           <button className="menu-button" onClick={() => setSidebarOpen(v => !v)}><Menu/></button>
           <div><h1>{navItems.find(x => x[0] === page)?.[1]}</h1><p>{new Date().toLocaleDateString(undefined, {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p></div>
-          <div className="top-actions"><button className="icon-button"><Bell size={20}/><span className="notification-dot"/></button><div className="top-profile"><div className="avatar small">AF</div><span>Architecture Faculty One</span></div></div>
+          <div className="top-actions"><select className="faculty-select" value={facultyId} onChange={event => setFacultyId(event.target.value)} aria-label="Select faculty dashboard"><option value="">Select faculty</option>{faculties.map(f => <option key={f.id} value={f.id}>{f.name} ({f.id})</option>)}</select><button className="icon-button"><Bell size={20}/>{arrivalNotice && <span className="notification-dot"/>}</button><div className="top-profile"><div className="avatar small">{selectedFaculty?.name?.split(/\s+/).map(x => x[0]).join('').slice(0,2).toUpperCase() || 'AF'}</div><span>{selectedFaculty?.name || 'Select faculty'}</span></div></div>
         </header>
 
         <section className="content">
