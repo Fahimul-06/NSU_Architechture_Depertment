@@ -1,0 +1,11 @@
+{
+  "students": [],
+  "departments": [{"code":"ARCH","name":"Department of Architecture, North South University"}],
+  "faculties": [],
+  "services": [],
+  "classSchedule": [],
+  "serviceHours": [],
+  "appointments": [],
+  "scanLogs": [],
+  "posSessions": []
+}

@@ -1,0 +1,16 @@
+{
+  "name": "nsu-architecture-queue-backend",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "seed": "node scripts/seed.mjs",
+    "migrate:json": "node scripts/migrate-json.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "mongoose": "^8.17.0"
+  }
+}
