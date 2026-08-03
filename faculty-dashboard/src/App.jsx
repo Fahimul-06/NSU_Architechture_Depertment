@@ -118,7 +118,7 @@ export default function App() {
   const renderQueueTable = (compact = false) => (
     <div className="table-wrap">
       <table>
-        <thead><tr><th>Time</th><th>Token</th><th>Student</th><th>Service</th><th>Status</th>{!compact && <th>Actions</th>}</tr></thead>
+        <thead><tr><th>Booking Time</th><th>Token</th><th>Student</th><th>Service</th><th>Status</th>{!compact && <th>Actions</th>}</tr></thead>
         <tbody>
           {filteredAppointments.map(a => (
             <tr key={a.id}>
@@ -170,7 +170,8 @@ export default function App() {
               <p className="eyebrow">STUDENT AT YOUR DOOR</p>
               <h2>{arrivalNotice.studentName}</h2>
               <p><strong>{arrivalNotice.studentId}</strong> · Token {arrivalNotice.token}</p>
-              <p>{arrivalNotice.service} · {formatTime(arrivalNotice.startTime)}–{formatTime(arrivalNotice.endTime)}</p>
+              <p>{arrivalNotice.service}</p>
+              <p><strong>Booking:</strong> {arrivalNotice.date} · {formatTime(arrivalNotice.startTime)}–{formatTime(arrivalNotice.endTime)}</p>
             </div>
             <div className="arrival-actions">
               <button className="secondary" onClick={() => respondToArrival(arrivalNotice, 'WAIT')}><PauseCircle size={18}/> Please Wait</button>
