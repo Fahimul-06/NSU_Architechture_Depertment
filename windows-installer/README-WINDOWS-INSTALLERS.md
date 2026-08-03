@@ -58,6 +58,6 @@ Run PowerShell:
 Push the project to GitHub, open **Actions**, select **Build Windows Installers**, and choose **Run workflow**. Download the `nsu-architecture-windows-installers` artifact after the job completes.
 
 
-## Version 1.3.0 queue display
+## Version 1.3.1 queue display
 
 After a student checks in by NFC or QR, the scanner displays the faculty response. When the faculty marks the appointment Completed, the scanner automatically displays the next checked-in student's token and student ID.
