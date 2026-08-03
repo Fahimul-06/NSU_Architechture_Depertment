@@ -6,7 +6,7 @@ import {
   PauseCircle, UserRoundX
 } from 'lucide-react';
 import Modal from './components/Modal';
-import { api } from './api';
+import { api, authStore } from './api';
 import { formatTime } from './utils/time';
 
 const navItems = [
@@ -30,11 +30,11 @@ function EmptyState({ text }) {
   return <div className="empty-state"><Users size={34}/><p>{text}</p></div>;
 }
 
-export default function App() {
+function Dashboard({ faculty, onLogout }) {
   const [page, setPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [faculties, setFaculties] = useState([]);
-  const [facultyId, setFacultyId] = useState('');
+  const faculties = [faculty];
+  const facultyId = faculty.id;
   const [appointments, setAppointments] = useState([]);
   const [services, setServices] = useState([]);
   const [classSchedule, setClassSchedule] = useState([]);
@@ -45,36 +45,23 @@ export default function App() {
   const [queuePaused, setQueuePaused] = useState(false);
   const [selected, setSelected] = useState(null);
   const [arrivalNotice, setArrivalNotice] = useState(null);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const selectedFaculty = useMemo(() => faculties.find(f => f.id === facultyId) || null, [faculties, facultyId]);
 
   const loadAll = async () => {
     if (!facultyId) return;
     try {
-      const [a, s, c, h] = await Promise.all([api.appointments(facultyId), api.services(facultyId), api.classSchedule(facultyId), api.serviceHours(facultyId)]);
-      setAppointments(a); setServices(s); setClassSchedule(c); setServiceHours(h); setConnectionError('');
+      const [a, s, c, h, n] = await Promise.all([api.appointments(facultyId), api.services(facultyId), api.classSchedule(facultyId), api.serviceHours(facultyId), api.notifications()]);
+      setAppointments(a); setServices(s); setClassSchedule(c); setServiceHours(h); setNotifications(n.items || []); setUnreadCount(n.unreadCount || 0); setConnectionError('');
       const pendingArrival = a.find(item => item.status === 'CHECKED_IN' && item.arrivalStatus === 'WAITING_FOR_FACULTY');
       setArrivalNotice(pendingArrival || null);
     } catch (error) { setConnectionError(error.message); }
   };
 
   useEffect(() => {
-    let active = true;
-    api.faculties().then(items => {
-      if (!active) return;
-      const available = items.filter(item => String(item.status || 'ACTIVE').toUpperCase() === 'ACTIVE');
-      setFaculties(available);
-      const urlFaculty = new URLSearchParams(window.location.search).get('facultyId');
-      const savedFaculty = localStorage.getItem('nsuArchitectureFacultyId');
-      const preferred = urlFaculty || savedFaculty || import.meta.env.VITE_FACULTY_ID;
-      const selected = available.find(item => item.id === preferred) || available[0];
-      if (selected) setFacultyId(selected.id);
-    }).catch(error => setConnectionError(error.message));
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => {
     if (!facultyId) return;
-    localStorage.setItem('nsuArchitectureFacultyId', facultyId);
     setArrivalNotice(null);
     loadAll();
     const timer = setInterval(loadAll, 2000);
@@ -129,6 +116,14 @@ export default function App() {
     try { await api.remove(route,id); await loadAll(); } catch(error){ alert(error.message); }
   };
 
+  const openNotification = async (item) => {
+    if (!item.readAt) { try { await api.readNotification(item.id); } catch {} }
+    setNotificationsOpen(false); setUnreadCount(v => Math.max(0, v - (item.readAt ? 0 : 1)));
+    if (item.appointmentId) { const appt = appointments.find(a => a.id === item.appointmentId); if (appt) { setPage('queue'); setSelected(appt); setModal({type:'appointment'}); } }
+  };
+  const markAllRead = async () => { try { await api.readAllNotifications(); setUnreadCount(0); setNotifications(items => items.map(x => ({...x, readAt:x.readAt || new Date().toISOString()}))); } catch(error){ alert(error.message); } };
+  const logout = async () => { try { await api.logout(); } catch {} authStore.clear(); onLogout(); };
+
   const printQueue = () => window.print();
 
   const renderQueueTable = (compact = false) => (
@@ -168,14 +163,14 @@ export default function App() {
           {navItems.map(([id, label, Icon]) => <button key={id} className={page === id ? 'active' : ''} onClick={() => {setPage(id); setSidebarOpen(false)}}><Icon size={20}/><span>{label}</span></button>)}
         </nav>
         <div className="faculty-card"><div className="avatar">{selectedFaculty?.name?.split(/\s+/).map(x => x[0]).join('').slice(0,2).toUpperCase() || 'AF'}</div><div><strong>{selectedFaculty?.name || 'Select faculty'}</strong><span>{selectedFaculty?.designation || 'NSU Architecture'}</span></div></div>
-        <button className="logout"><LogOut size={19}/> Sign out</button>
+        <button className="logout" onClick={logout}><LogOut size={19}/> Sign out</button>
       </aside>
 
       <main>
         <header className="topbar">
           <button className="menu-button" onClick={() => setSidebarOpen(v => !v)}><Menu/></button>
           <div><h1>{navItems.find(x => x[0] === page)?.[1]}</h1><p>{new Date().toLocaleDateString(undefined, {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p></div>
-          <div className="top-actions"><select className="faculty-select" value={facultyId} onChange={event => setFacultyId(event.target.value)} aria-label="Select faculty dashboard"><option value="">Select faculty</option>{faculties.map(f => <option key={f.id} value={f.id}>{f.name} ({f.id})</option>)}</select><button className="icon-button"><Bell size={20}/>{arrivalNotice && <span className="notification-dot"/>}</button><div className="top-profile"><div className="avatar small">{selectedFaculty?.name?.split(/\s+/).map(x => x[0]).join('').slice(0,2).toUpperCase() || 'AF'}</div><span>{selectedFaculty?.name || 'Select faculty'}</span></div></div>
+          <div className="top-actions"><div className="notification-wrap"><button className="icon-button" onClick={() => setNotificationsOpen(v => !v)} aria-label="Notifications"><Bell size={20}/>{unreadCount > 0 && <span className="notification-count">{unreadCount > 99 ? "99+" : unreadCount}</span>}</button>{notificationsOpen && <div className="notification-panel"><div className="notification-header"><div><strong>Notifications</strong><span>{unreadCount} unread</span></div><button onClick={markAllRead}>Mark all read</button></div><div className="notification-list">{notifications.length ? notifications.map(item => <button key={item.id} className={`notification-item ${item.readAt ? "" : "unread"}`} onClick={() => openNotification(item)}><span className="notification-type">{item.title}</span><strong>{item.token || "Queue update"}</strong><p>{item.message}</p><small>{new Date(item.createdAt).toLocaleString()}</small></button>) : <div className="notification-empty">No notifications yet.</div>}</div></div>}</div><div className="top-profile"><div className="avatar small">{selectedFaculty?.name?.split(/\s+/).map(x => x[0]).join('').slice(0,2).toUpperCase() || 'AF'}</div><span>{selectedFaculty?.name || 'Select faculty'}</span></div></div>
         </header>
 
         <section className="content">
@@ -235,4 +230,28 @@ export default function App() {
       {modal?.type === 'serviceHour' && <Modal title={modal.item ? 'Edit Service Hour' : 'Add Service Hour'} onClose={() => setModal(null)}><form onSubmit={saveServiceHour} className="form-grid two"><label>Day<select name="day" defaultValue={modal.item?.day || 'Sunday'}>{['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d => <option key={d}>{d}</option>)}</select></label><label>Service<select name="service" defaultValue={modal.item?.service || services[0]?.name}>{services.map(s => <option key={s.id}>{s.name}</option>)}</select></label><label>Start time<input name="start" type="time" required defaultValue={modal.item?.start || '15:00'}/></label><label>End time<input name="end" type="time" required defaultValue={modal.item?.end || '17:00'}/></label><label>Minutes per student<input name="duration" type="number" min="5" required defaultValue={modal.item?.duration || 15}/></label><div className="modal-actions full"><button type="button" className="secondary" onClick={() => setModal(null)}>Cancel</button><button className="primary">Save Schedule</button></div></form></Modal>}
     </div>
   );
+}
+
+
+function Login({ onAuthenticated }) {
+  const [login, setLogin] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const submit = async event => {
+    event.preventDefault(); setLoading(true); setError('');
+    try { const result = await api.login(login.trim(), password); authStore.set(result.token); onAuthenticated(result.faculty); }
+    catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  };
+  return <div className="login-page"><div className="login-card"><div className="login-brand"><div className="brand-mark">NSU</div><div><h1>Architecture Faculty Portal</h1><p>North South University</p></div></div><form onSubmit={submit}><label>Employee ID or university email<input value={login} onChange={e=>setLogin(e.target.value)} autoComplete="username" required placeholder="ARCH-FAC-001"/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/></label>{error && <div className="login-error">{error}</div>}<button className="primary login-submit" disabled={loading}>{loading ? 'Signing in…' : 'Sign in'}</button></form><small>Initial test password: <strong>ChangeMe123!</strong>. Change it before production.</small></div></div>;
+}
+
+export default function App() {
+  const [faculty, setFaculty] = useState(null);
+  const [checking, setChecking] = useState(Boolean(authStore.get()));
+  useEffect(() => { if (!authStore.get()) { setChecking(false); return; } api.me().then(r => setFaculty(r.faculty)).catch(() => authStore.clear()).finally(() => setChecking(false)); }, []);
+  if (checking) return <div className="auth-loading">Checking faculty session…</div>;
+  if (!faculty) return <Login onAuthenticated={setFaculty}/>;
+  return <Dashboard faculty={faculty} onLogout={() => setFaculty(null)}/>;
 }

@@ -31,8 +31,11 @@ export const Faculty = make('Faculty', {
   departmentCode: { type: String, required: true, trim: true, uppercase: true },
   officeRoom: { type: String, default: '', trim: true },
   nfcUid: { type: String, default: undefined, unique: true, sparse: true, trim: true, uppercase: true },
-  status: { type: String, default: 'ACTIVE', uppercase: true }
-}, [[{ departmentCode: 1, status: 1 }, {}]]);
+  status: { type: String, default: 'ACTIVE', uppercase: true },
+  passwordHash: { type: String, default: '' },
+  passwordChangedAt: Date,
+  lastLoginAt: Date
+}, [[{ departmentCode: 1, status: 1 }, {}], [{ email: 1 }, { sparse: true }]]);
 
 export const Department = make('Department', {
   code: { type: String, required: true, unique: true, trim: true, uppercase: true },
@@ -76,4 +79,28 @@ export const PosSession = make('PosSession', {
   status: { type: String, default: 'READY' }, expiresAt: { type: Date, required: true, index: true }, consumedAt: Date
 }, [[{ expiresAt: 1 }, { expireAfterSeconds: 300 }], [{ terminalId: 1, consumedAt: 1, createdAt: -1 }, {}]]);
 
-export const models = { Student, Faculty, Department, Service, ClassSchedule, ServiceHour, Appointment, ScanLog, PosSession };
+
+export const AuthSession = make('AuthSession', {
+  id: { type: String, required: true, unique: true },
+  tokenHash: { type: String, required: true, unique: true },
+  facultyId: { type: String, required: true, index: true },
+  expiresAt: { type: Date, required: true, index: true },
+  lastUsedAt: Date,
+  revokedAt: Date
+}, [[{ expiresAt: 1 }, { expireAfterSeconds: 0 }]]);
+
+export const Notification = make('Notification', {
+  id: { type: String, required: true, unique: true },
+  facultyId: { type: String, required: true, index: true },
+  type: { type: String, required: true },
+  title: { type: String, required: true },
+  message: { type: String, required: true },
+  appointmentId: String,
+  token: String,
+  studentId: String,
+  studentName: String,
+  readAt: Date,
+  createdAt: { type: Date, default: Date.now, index: true }
+}, [[{ facultyId: 1, readAt: 1, createdAt: -1 }, {}]]);
+
+export const models = { Student, Faculty, Department, Service, ClassSchedule, ServiceHour, Appointment, ScanLog, PosSession, AuthSession, Notification };

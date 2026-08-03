@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import { connectDatabase, closeDatabase } from './db.mjs';
 import { seedIfEmpty } from './seed.mjs';
-import { Student, Faculty, Department, Service, ClassSchedule, ServiceHour, Appointment, ScanLog, PosSession } from './models/index.mjs';
+import { Student, Faculty, Department, Service, ClassSchedule, ServiceHour, Appointment, ScanLog, PosSession, AuthSession, Notification } from './models/index.mjs';
 
 const PORT = Number(process.env.PORT || 8080);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
@@ -21,6 +21,31 @@ const parseQrPayload=raw=>{const text=String(raw||'').trim();try{if(text.startsW
 const duplicateMessage=e=>e?.code===11000?`Duplicate value for ${Object.keys(e.keyPattern||{}).join(', ')||'unique field'}.`:null;
 const dhakaParts=()=>{const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Dhaka',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());const o=Object.fromEntries(parts.map(x=>[x.type,x.value]));return{date:`${o.year}-${o.month}-${o.day}`,minutes:Number(o.hour)*60+Number(o.minute)};};
 const appointmentDetails=a=>plain(a);
+const DEFAULT_FACULTY_PASSWORD=process.env.DEFAULT_FACULTY_PASSWORD||'ChangeMe123!';
+const hashToken=t=>crypto.createHash('sha256').update(String(t)).digest('hex');
+const passwordHash=(password,salt=crypto.randomBytes(16).toString('hex'))=>`${salt}:${crypto.scryptSync(String(password),salt,64).toString('hex')}`;
+const verifyPassword=(password,stored)=>{try{const[salt,key]=String(stored||'').split(':');if(!salt||!key)return false;return crypto.timingSafeEqual(Buffer.from(key,'hex'),crypto.scryptSync(String(password),salt,64));}catch{return false;}};
+const bearer=req=>String(req.headers.authorization||'').replace(/^Bearer\s+/i,'').trim();
+async function authenticatedFaculty(req){
+  const token=bearer(req);if(!token)return null;
+  const session=await AuthSession.findOne({tokenHash:hashToken(token),revokedAt:null,expiresAt:{$gt:new Date()}});
+  if(!session)return null;
+  const faculty=await Faculty.findOne({id:session.facultyId,status:'ACTIVE'}).lean();
+  if(!faculty)return null;
+  session.lastUsedAt=new Date();await session.save();
+  return faculty;
+}
+async function requireFaculty(req,res,expectedFacultyId=null){
+  const faculty=await authenticatedFaculty(req);
+  if(!faculty){json(res,401,{message:'Faculty login required.'});return null;}
+  if(expectedFacultyId&&faculty.id!==expectedFacultyId){json(res,403,{message:'You can only access your own faculty dashboard.'});return null;}
+  return faculty;
+}
+async function notifyFaculty(a,type,title,message){
+  if(!a?.facultyId)return;
+  await Notification.create({id:crypto.randomUUID(),facultyId:a.facultyId,type,title,message,appointmentId:a.id,token:a.token,studentId:a.studentId,studentName:a.studentName,createdAt:new Date()});
+}
+
 async function validateArrival(a,{deviceName='Faculty Office Scanner',method='QR'}={}){
   const nowInfo=dhakaParts();
   const reject=(reason,message)=>({accepted:false,reason,message,appointment:appointmentDetails(a),scannedAt:new Date().toISOString()});
@@ -34,6 +59,7 @@ async function validateArrival(a,{deviceName='Faculty Office Scanner',method='QR
   const now=new Date();
   Object.assign(a,{status:'CHECKED_IN',checkedInAt:now,scannerDevice:deviceName,checkInMethod:method,arrivalStatus:'WAITING_FOR_FACULTY',arrivalTiming:earlyArrival?'EARLY':'ON_TIME',facultyResponse:null,facultyResponseMessage:'Waiting for faculty response.',facultyRespondedAt:null});
   await a.save();
+  await notifyFaculty(a,'STUDENT_ARRIVAL','Student at your door',`${a.studentName} (${a.studentId}), token ${a.token}, has arrived for ${a.service} at ${a.startTime}.`);
   const reason=earlyArrival?'EARLY_ARRIVAL':'VALID';
   const message=earlyArrival
     ?`You arrived before your scheduled time (${a.startTime}-${a.endTime}). Your arrival was sent to the faculty. Please wait for WAIT or COME IN.`
@@ -79,8 +105,45 @@ async function allocateSlot(facultyId,service){
 async function handle(req,res){
   if(req.method==='OPTIONS')return json(res,204);
   const url=new URL(req.url,`http://${req.headers.host}`),p=url.pathname;
-  if(p==='/api/health')return json(res,200,{ok:true,version:'1.4.0-call-display',features:['arrival-alert','faculty-response','scanner-polling','next-student','faculty-call-display'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
+  if(p==='/api/health')return json(res,200,{ok:true,version:'1.5.0-auth-notifications',features:['arrival-alert','faculty-response','scanner-polling','next-student','faculty-call-display'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
 
+  if(p==='/api/auth/faculty/login'&&req.method==='POST'){
+    const b=await readBody(req),login=String(b.login||b.employeeId||b.email||'').trim(),password=String(b.password||'');
+    const faculty=await Faculty.findOne({$or:[{id:login},{email:login.toLowerCase()}],status:'ACTIVE'});
+    if(!faculty)return json(res,401,{message:'Invalid employee ID/email or password.'});
+    if(!faculty.passwordHash){faculty.passwordHash=passwordHash(DEFAULT_FACULTY_PASSWORD);await faculty.save();}
+    if(!verifyPassword(password,faculty.passwordHash))return json(res,401,{message:'Invalid employee ID/email or password.'});
+    const token=crypto.randomBytes(32).toString('hex');
+    await AuthSession.create({id:crypto.randomUUID(),tokenHash:hashToken(token),facultyId:faculty.id,expiresAt:new Date(Date.now()+12*60*60*1000),lastUsedAt:new Date()});
+    faculty.lastLoginAt=new Date();await faculty.save();
+    const out=plain(faculty);delete out.passwordHash;
+    return json(res,200,{token,faculty:out,expiresInSeconds:43200,mustChangePassword:password===DEFAULT_FACULTY_PASSWORD});
+  }
+  if(p==='/api/auth/faculty/me'&&req.method==='GET'){
+    const faculty=await requireFaculty(req,res);if(!faculty)return;delete faculty.passwordHash;return json(res,200,{faculty});
+  }
+  if(p==='/api/auth/faculty/logout'&&req.method==='POST'){
+    const token=bearer(req);if(token)await AuthSession.updateOne({tokenHash:hashToken(token)},{$set:{revokedAt:new Date()}});return json(res,200,{ok:true});
+  }
+  if(p==='/api/auth/faculty/change-password'&&req.method==='PUT'){
+    const auth=await requireFaculty(req,res);if(!auth)return;const b=await readBody(req);
+    const faculty=await Faculty.findOne({id:auth.id});
+    if(!verifyPassword(String(b.currentPassword||''),faculty.passwordHash))return json(res,400,{message:'Current password is incorrect.'});
+    if(String(b.newPassword||'').length<8)return json(res,400,{message:'New password must be at least 8 characters.'});
+    faculty.passwordHash=passwordHash(b.newPassword);faculty.passwordChangedAt=new Date();await faculty.save();return json(res,200,{ok:true});
+  }
+  if(p==='/api/faculty/notifications'&&req.method==='GET'){
+    const faculty=await requireFaculty(req,res);if(!faculty)return;
+    const items=await Notification.find({facultyId:faculty.id}).sort({createdAt:-1}).limit(100).lean();
+    return json(res,200,{items,unreadCount:items.filter(x=>!x.readAt).length});
+  }
+  if(p==='/api/faculty/notifications/read-all'&&req.method==='PUT'){
+    const faculty=await requireFaculty(req,res);if(!faculty)return;await Notification.updateMany({facultyId:faculty.id,readAt:null},{$set:{readAt:new Date()}});return json(res,200,{ok:true});
+  }
+  const notificationRead=p.match(/^\/api\/faculty\/notifications\/([^/]+)\/read$/);
+  if(notificationRead&&req.method==='PUT'){
+    const faculty=await requireFaculty(req,res);if(!faculty)return;const item=await Notification.findOneAndUpdate({id:notificationRead[1],facultyId:faculty.id},{$set:{readAt:new Date()}},{new:true}).lean();return item?json(res,200,item):json(res,404,{message:'Notification not found.'});
+  }
   if(p==='/api/students/by-nfc'&&req.method==='GET'){
     const rawUid=url.searchParams.get('uid'),uid=normalizeUid(rawUid);
     if(!uid)return json(res,400,{message:'No NFC UID was received.'});
@@ -152,7 +215,7 @@ async function handle(req,res){
 
   if(p==='/api/faculties'&&req.method==='GET'){
     const q=url.searchParams.get('department')?{departmentCode:url.searchParams.get('department').toUpperCase()}:{};
-    return json(res,200,await Faculty.find(q).sort({name:1}).lean());
+    return json(res,200,await Faculty.find(q).select('-passwordHash -passwordChangedAt -lastLoginAt').sort({name:1}).lean());
   }
   if(p==='/api/faculties'&&req.method==='POST'){
     const b=await readBody(req),id=String(b.id||b.employeeId||'').trim(),uid=normalizeUid(b.nfcUid),departmentCode=String(b.departmentCode||'').toUpperCase();
@@ -160,7 +223,7 @@ async function handle(req,res){
     if(departmentCode!==ARCH_DEPARTMENT_CODE)return json(res,403,{message:'Only NSU Architecture faculty can be registered in this deployment.'});
     if(!await Department.exists({code:departmentCode}))return json(res,400,{message:'Invalid department.'});
     await assertNfcAvailable(uid);
-    const item=await Faculty.create({id,name:String(b.name).trim(),email:String(b.email||'').trim(),designation:b.designation,departmentCode,officeRoom:String(b.officeRoom||'').trim(),nfcUid:uid,status:b.status||'ACTIVE'});
+    const item=await Faculty.create({id,name:String(b.name).trim(),email:String(b.email||'').trim().toLowerCase(),designation:b.designation,departmentCode,officeRoom:String(b.officeRoom||'').trim(),nfcUid:uid,status:b.status||'ACTIVE',passwordHash:passwordHash(DEFAULT_FACULTY_PASSWORD)});
     return json(res,201,plain(item));
   }
   const facultyMatch=p.match(/^\/api\/faculties\/([^/]+)$/);
@@ -179,7 +242,8 @@ async function handle(req,res){
     return json(res,200,await Service.find(q).lean());
   }
   if(p==='/api/appointments'&&req.method==='GET'){
-    const q={};if(url.searchParams.get('facultyId'))q.facultyId=url.searchParams.get('facultyId');
+    const requested=url.searchParams.get('facultyId');if(requested){const auth=await requireFaculty(req,res,requested);if(!auth)return;}
+    const q={};if(requested)q.facultyId=requested;
     return json(res,200,await Appointment.find(q).sort({date:1,startTime:1}).lean());
   }
   if(p==='/api/appointments'&&req.method==='POST'){
@@ -216,8 +280,8 @@ async function handle(req,res){
   const arrivalResponseMatch=p.match(/^\/api\/appointments\/([^/]+)\/arrival-response$/);
   if(arrivalResponseMatch&&req.method==='PUT'){
     const b=await readBody(req),response=String(b.response||'').toUpperCase();if(!['COME_IN','WAIT'].includes(response))return json(res,400,{message:'Response must be COME_IN or WAIT.'});
-    const a=await Appointment.findOne({id:arrivalResponseMatch[1]});if(!a)return json(res,404,{message:'Appointment not found.'});if(!a.checkedInAt)return json(res,409,{message:'Student has not checked in yet.'});
-    Object.assign(a,{facultyResponse:response,arrivalStatus:response==='COME_IN'?'COME_IN':'WAIT',facultyResponseMessage:response==='COME_IN'?'Please come in now.':'Please wait outside. The faculty will call you shortly.',facultyRespondedAt:new Date()});if(response==='COME_IN'){a.status='CALLED';a.calledAt=new Date();}await a.save();return json(res,200,plain(a));
+    const a=await Appointment.findOne({id:arrivalResponseMatch[1]});if(!a)return json(res,404,{message:'Appointment not found.'});const auth=await requireFaculty(req,res,a.facultyId);if(!auth)return;if(!a.checkedInAt)return json(res,409,{message:'Student has not checked in yet.'});
+    Object.assign(a,{facultyResponse:response,arrivalStatus:response==='COME_IN'?'COME_IN':'WAIT',facultyResponseMessage:response==='COME_IN'?'Please come in now.':'Please wait outside. The faculty will call you shortly.',facultyRespondedAt:new Date()});if(response==='COME_IN'){a.status='CALLED';a.calledAt=new Date();}await a.save();await notifyFaculty(a,response==='COME_IN'?'STUDENT_CALLED':'STUDENT_WAITING',response==='COME_IN'?'Student called':'Student asked to wait',`${a.token} — ${a.studentName} was told to ${response==='COME_IN'?'come in':'wait'}.`);return json(res,200,plain(a));
   }
   const studentMessageMatch=p.match(/^\/api\/appointments\/([^/]+)\/student-message$/);
   if(studentMessageMatch&&req.method==='GET'){
@@ -255,19 +319,23 @@ async function handle(req,res){
   }
   const appointmentMatch=p.match(/^\/api\/appointments\/([^/]+)\/status$/);
   if(appointmentMatch&&req.method==='PUT'){
+    const existing=await Appointment.findOne({id:appointmentMatch[1]});if(!existing)return json(res,404,{message:'Appointment not found.'});
+    const auth=await requireFaculty(req,res,existing.facultyId);if(!auth)return;
     const b=await readBody(req),status=String(b.status||'').toUpperCase();
     const update={status};
     if(status==='CALLED') Object.assign(update,{calledAt:new Date(),facultyResponse:'COME_IN',arrivalStatus:'COME_IN',facultyResponseMessage:'Please come in now.',facultyRespondedAt:new Date()});
-    const a=await Appointment.findOneAndUpdate({id:appointmentMatch[1]},{$set:update},{new:true}).lean();return a?json(res,200,a):json(res,404,{message:'Appointment not found.'});
+    Object.assign(existing,update);await existing.save();
+    await notifyFaculty(existing,`STATUS_${status}`,'Queue status updated',`${existing.token} — ${existing.studentName} is now ${status.replaceAll('_',' ').toLowerCase()}.`);
+    return json(res,200,plain(existing));
   }
 
   const crud=[['/api/services',Service],['/api/class-schedule',ClassSchedule],['/api/service-hours',ServiceHour]];
   for(const[route,Model]of crud){
-    if(p===route&&req.method==='GET'){const q=url.searchParams.get('facultyId')?{facultyId:url.searchParams.get('facultyId')}:{};return json(res,200,await Model.find(q).lean());}
-    if(p===route&&req.method==='POST'){const b=await readBody(req),item=await Model.create({...b,id:b.id||crypto.randomUUID(),facultyId:b.facultyId||'FAC-001'});return json(res,201,plain(item));}
+    if(p===route&&req.method==='GET'){const fid=url.searchParams.get('facultyId');if(route!=='/api/services'&&fid){const auth=await requireFaculty(req,res,fid);if(!auth)return;}const q=fid?{facultyId:fid}:{};return json(res,200,await Model.find(q).lean());}
+    if(p===route&&req.method==='POST'){const b=await readBody(req);const auth=await requireFaculty(req,res,b.facultyId);if(!auth)return;const item=await Model.create({...b,id:b.id||crypto.randomUUID(),facultyId:b.facultyId||'FAC-001'});return json(res,201,plain(item));}
     const m=p.match(new RegExp(`^${route}/([^/]+)$`));
-    if(m&&req.method==='PUT'){const b=await readBody(req),item=await Model.findOneAndUpdate({id:m[1]},{$set:b},{new:true,runValidators:true}).lean();return item?json(res,200,item):json(res,404,{message:'Record not found.'});}
-    if(m&&req.method==='DELETE'){const item=await Model.findOneAndDelete({id:m[1]});return item?json(res,200,{ok:true}):json(res,404,{message:'Record not found.'});}
+    if(m&&req.method==='PUT'){const current=await Model.findOne({id:m[1]}).lean();if(!current)return json(res,404,{message:'Record not found.'});const auth=await requireFaculty(req,res,current.facultyId);if(!auth)return;const b=await readBody(req),item=await Model.findOneAndUpdate({id:m[1]},{$set:b},{new:true,runValidators:true}).lean();return item?json(res,200,item):json(res,404,{message:'Record not found.'});}
+    if(m&&req.method==='DELETE'){const current=await Model.findOne({id:m[1]}).lean();if(!current)return json(res,404,{message:'Record not found.'});const auth=await requireFaculty(req,res,current.facultyId);if(!auth)return;const item=await Model.findOneAndDelete({id:m[1]});return item?json(res,200,{ok:true}):json(res,404,{message:'Record not found.'});}
   }
   return json(res,404,{message:'Route not found.'});
 }
