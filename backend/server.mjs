@@ -221,12 +221,39 @@ async function handle(req,res){
   }
   const studentMessageMatch=p.match(/^\/api\/appointments\/([^/]+)\/student-message$/);
   if(studentMessageMatch&&req.method==='GET'){
-    const a=await Appointment.findOne({id:studentMessageMatch[1]}).lean();if(!a)return json(res,404,{message:'Appointment not found.'});return json(res,200,{appointmentId:a.id,token:a.token,arrivalStatus:a.arrivalStatus||null,facultyResponse:a.facultyResponse||null,message:a.facultyResponseMessage||'Waiting for faculty response.',facultyRespondedAt:a.facultyRespondedAt||null,status:a.status});
+    const a=await Appointment.findOne({id:studentMessageMatch[1]}).lean();
+    if(!a)return json(res,404,{message:'Appointment not found.'});
+    let nextStudent=null;
+    if(a.status==='COMPLETED'){
+      nextStudent=await Appointment.findOne({
+        facultyId:a.facultyId,
+        date:a.date,
+        id:{$ne:a.id},
+        status:{$in:['CHECKED_IN','WAITING','CALLED','BOOKED']}
+      }).sort({checkedInAt:1,startTime:1,createdAt:1}).lean();
+    }
+    return json(res,200,{
+      appointmentId:a.id,token:a.token,arrivalStatus:a.arrivalStatus||null,
+      facultyResponse:a.facultyResponse||null,
+      message:a.facultyResponseMessage||'Waiting for faculty response.',
+      facultyRespondedAt:a.facultyRespondedAt||null,status:a.status,
+      nextStudent:nextStudent?{
+        appointmentId:nextStudent.id,token:nextStudent.token,studentId:nextStudent.studentId,
+        studentName:nextStudent.studentName,startTime:nextStudent.startTime,endTime:nextStudent.endTime,
+        service:nextStudent.service,status:nextStudent.status
+      }:null
+    });
   }
   if(p==='/api/tickets/scan-logs'&&req.method==='GET')return json(res,200,await ScanLog.find().sort({scannedAt:-1}).limit(1000).lean());
   const appointmentMatch=p.match(/^\/api\/appointments\/([^/]+)\/status$/);
   if(appointmentMatch&&req.method==='PUT'){
-    const b=await readBody(req),a=await Appointment.findOneAndUpdate({id:appointmentMatch[1]},{$set:{status:b.status}},{new:true}).lean();return a?json(res,200,a):json(res,404,{message:'Appointment not found.'});
+    const b=await readBody(req),status=String(b.status||'').toUpperCase();
+    const update={status};
+    if(status==='COMPLETED'){
+      Object.assign(update,{completedAt:new Date(),arrivalStatus:'COMPLETED',facultyResponseMessage:'Your service has been completed.'});
+    }
+    const a=await Appointment.findOneAndUpdate({id:appointmentMatch[1]},{$set:update},{new:true}).lean();
+    return a?json(res,200,a):json(res,404,{message:'Appointment not found.'});
   }
 
   const crud=[['/api/services',Service],['/api/class-schedule',ClassSchedule],['/api/service-hours',ServiceHour]];
