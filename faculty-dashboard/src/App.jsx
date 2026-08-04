@@ -52,20 +52,37 @@ function Dashboard({ faculty, onLogout }) {
 
   const loadAll = async () => {
     if (!facultyId) return;
+    const results = await Promise.allSettled([
+      api.appointments(facultyId), api.services(facultyId), api.classSchedule(facultyId),
+      api.serviceHours(facultyId), api.notifications()
+    ]);
+    const [a, s, c, h, n] = results;
+    if (a.status === 'fulfilled') setAppointments(a.value);
+    if (s.status === 'fulfilled') setServices(s.value);
+    if (c.status === 'fulfilled') setClassSchedule(c.value);
+    if (h.status === 'fulfilled') setServiceHours(h.value);
+    if (n.status === 'fulfilled') { setNotifications(n.value.items || []); setUnreadCount(n.value.unreadCount || 0); }
+    const failed = results.find(r => r.status === 'rejected');
+    setConnectionError(failed ? failed.reason?.message || 'Some dashboard data could not be loaded.' : '');
+  };
+
+  const pollArrivalScreen = async () => {
     try {
-      const [a, s, c, h, n] = await Promise.all([api.appointments(facultyId), api.services(facultyId), api.classSchedule(facultyId), api.serviceHours(facultyId), api.notifications()]);
-      setAppointments(a); setServices(s); setClassSchedule(c); setServiceHours(h); setNotifications(n.items || []); setUnreadCount(n.unreadCount || 0); setConnectionError('');
-      const pendingArrival = a.find(item => item.status === 'CHECKED_IN' && item.arrivalStatus === 'WAITING_FOR_FACULTY');
-      setArrivalNotice(pendingArrival || null);
-    } catch (error) { setConnectionError(error.message); }
+      const result = await api.arrivalScreen();
+      setArrivalNotice(result.active ? result.arrival : null);
+    } catch (error) {
+      setConnectionError(error.message);
+    }
   };
 
   useEffect(() => {
     if (!facultyId) return;
     setArrivalNotice(null);
     loadAll();
-    const timer = setInterval(loadAll, 750);
-    return () => clearInterval(timer);
+    pollArrivalScreen();
+    const dashboardTimer = setInterval(loadAll, 5000);
+    const arrivalTimer = setInterval(pollArrivalScreen, 700);
+    return () => { clearInterval(dashboardTimer); clearInterval(arrivalTimer); };
   }, [facultyId]);
 
   const filteredAppointments = useMemo(() => {
@@ -91,6 +108,8 @@ function Dashboard({ faculty, onLogout }) {
       const updated = await api.arrivalResponse(appointment.id, response);
       setAppointments(items => items.map(item => item.id === updated.id ? updated : item));
       setArrivalNotice(null);
+      await pollArrivalScreen();
+      await loadAll();
     } catch (error) { alert(error.message); }
   };
 

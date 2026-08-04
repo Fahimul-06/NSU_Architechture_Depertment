@@ -126,7 +126,7 @@ async function handle(req,res){
   if(req.method==='OPTIONS')return json(res,204);
   const url=new URL(req.url,`http://${req.headers.host}`),p=url.pathname;
   if(p==='/api/readiness')return json(res,mongoose.connection.readyState===1?200:503,{ok:mongoose.connection.readyState===1,database:mongoose.connection.readyState===1?'connected':'disconnected'});
-  if(p==='/api/health')return json(res,200,{ok:true,version:'2.2.0-ticket-page',features:['arrival-alert','faculty-response','scanner-polling','next-student','faculty-call-display'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
+  if(p==='/api/health')return json(res,200,{ok:true,version:'2.3.0-arrival-channel-fix',features:['arrival-alert','faculty-response','scanner-polling','next-student','faculty-call-display'],database:mongoose.connection.readyState===1?'connected':'disconnected',time:new Date().toISOString()});
 
   if(p==='/api/auth/admin/login'&&req.method==='POST'){
     if(!allowLogin(req))return json(res,429,{message:'Too many login attempts. Try again later.'});
@@ -279,6 +279,11 @@ async function handle(req,res){
     const requested=url.searchParams.get('facultyId');if(requested){const auth=await requireFaculty(req,res,requested);if(!auth)return;}
     const q={};if(requested)q.facultyId=requested;
     return json(res,200,await Appointment.find(q).sort({date:1,startTime:1}).lean());
+  }
+  if(p==='/api/faculty/arrival-screen'&&req.method==='GET'){
+    const faculty=await requireFaculty(req,res);if(!faculty)return;
+    const arrival=await Appointment.findOne({facultyId:faculty.id,status:'CHECKED_IN',arrivalStatus:'WAITING_FOR_FACULTY'}).sort({checkedInAt:1,startTime:1}).lean();
+    return json(res,200,{active:Boolean(arrival),arrival:arrival||null,serverTime:new Date().toISOString()});
   }
   if(p==='/api/appointments'&&req.method==='POST'){
     const b=await readBody(req);

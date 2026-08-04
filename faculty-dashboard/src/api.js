@@ -22,6 +22,7 @@ export const api = {
   logout: () => request('/api/auth/faculty/logout',{method:'POST'}),
   changePassword: data => request('/api/auth/faculty/change-password',{method:'PUT',body:JSON.stringify(data)}),
   notifications: () => request('/api/faculty/notifications'),
+  arrivalScreen: () => request('/api/faculty/arrival-screen'),
   readNotification: id => request(`/api/faculty/notifications/${id}/read`,{method:'PUT'}),
   readAllNotifications: () => request('/api/faculty/notifications/read-all',{method:'PUT'}),
   appointments: facultyId => request(`/api/appointments?facultyId=${encodeURIComponent(facultyId)}`),
