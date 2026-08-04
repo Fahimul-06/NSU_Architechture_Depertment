@@ -6,7 +6,7 @@ import {
   PauseCircle, UserRoundX
 } from 'lucide-react';
 import Modal from './components/Modal';
-import { api, authStore } from './api';
+import { api } from './api';
 import { formatTime } from './utils/time';
 
 const navItems = [
@@ -30,11 +30,10 @@ function EmptyState({ text }) {
   return <div className="empty-state"><Users size={34}/><p>{text}</p></div>;
 }
 
-function Dashboard({ faculty, onLogout }) {
+export default function App() {
   const [page, setPage] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const faculties = [faculty];
-  const facultyId = faculty.id;
+  const facultyId = 'ARCH-FAC-001';
   const [appointments, setAppointments] = useState([]);
   const [services, setServices] = useState([]);
   const [classSchedule, setClassSchedule] = useState([]);
@@ -45,45 +44,26 @@ function Dashboard({ faculty, onLogout }) {
   const [queuePaused, setQueuePaused] = useState(false);
   const [selected, setSelected] = useState(null);
   const [arrivalNotice, setArrivalNotice] = useState(null);
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const selectedFaculty = useMemo(() => faculties.find(f => f.id === facultyId) || null, [faculties, facultyId]);
+  const seenArrivals = useRef(new Set());
+
 
   const loadAll = async () => {
-    if (!facultyId) return;
-    const results = await Promise.allSettled([
-      api.appointments(facultyId), api.services(facultyId), api.classSchedule(facultyId),
-      api.serviceHours(facultyId), api.notifications()
-    ]);
-    const [a, s, c, h, n] = results;
-    if (a.status === 'fulfilled') setAppointments(a.value);
-    if (s.status === 'fulfilled') setServices(s.value);
-    if (c.status === 'fulfilled') setClassSchedule(c.value);
-    if (h.status === 'fulfilled') setServiceHours(h.value);
-    if (n.status === 'fulfilled') { setNotifications(n.value.items || []); setUnreadCount(n.value.unreadCount || 0); }
-    const failed = results.find(r => r.status === 'rejected');
-    setConnectionError(failed ? failed.reason?.message || 'Some dashboard data could not be loaded.' : '');
-  };
-
-  const pollArrivalScreen = async () => {
     try {
-      const result = await api.arrivalScreen();
-      setArrivalNotice(result.active ? result.arrival : null);
-    } catch (error) {
-      setConnectionError(error.message);
-    }
+      const [a, s, c, h] = await Promise.all([api.appointments(facultyId), api.services(facultyId), api.classSchedule(facultyId), api.serviceHours(facultyId)]);
+      setAppointments(a); setServices(s); setClassSchedule(c); setServiceHours(h); setConnectionError('');
+      const pendingArrival = a.find(item => item.status === 'CHECKED_IN' && item.arrivalStatus === 'WAITING_FOR_FACULTY' && !seenArrivals.current.has(item.id));
+      if (pendingArrival) {
+        setArrivalNotice(pendingArrival);
+        seenArrivals.current.add(pendingArrival.id);
+      }
+    } catch (error) { setConnectionError(error.message); }
   };
 
   useEffect(() => {
-    if (!facultyId) return;
-    setArrivalNotice(null);
     loadAll();
-    pollArrivalScreen();
-    const dashboardTimer = setInterval(loadAll, 5000);
-    const arrivalTimer = setInterval(pollArrivalScreen, 700);
-    return () => { clearInterval(dashboardTimer); clearInterval(arrivalTimer); };
-  }, [facultyId]);
+    const timer = setInterval(loadAll, 3000);
+    return () => clearInterval(timer);
+  }, []);
 
   const filteredAppointments = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -108,8 +88,6 @@ function Dashboard({ faculty, onLogout }) {
       const updated = await api.arrivalResponse(appointment.id, response);
       setAppointments(items => items.map(item => item.id === updated.id ? updated : item));
       setArrivalNotice(null);
-      await pollArrivalScreen();
-      await loadAll();
     } catch (error) { alert(error.message); }
   };
 
@@ -134,14 +112,6 @@ function Dashboard({ faculty, onLogout }) {
   const removeItem = async (route, id) => {
     try { await api.remove(route,id); await loadAll(); } catch(error){ alert(error.message); }
   };
-
-  const openNotification = async (item) => {
-    if (!item.readAt) { try { await api.readNotification(item.id); } catch {} }
-    setNotificationsOpen(false); setUnreadCount(v => Math.max(0, v - (item.readAt ? 0 : 1)));
-    if (item.appointmentId) { const appt = appointments.find(a => a.id === item.appointmentId); if (appt) { setPage('queue'); setSelected(appt); setModal({type:'appointment'}); } }
-  };
-  const markAllRead = async () => { try { await api.readAllNotifications(); setUnreadCount(0); setNotifications(items => items.map(x => ({...x, readAt:x.readAt || new Date().toISOString()}))); } catch(error){ alert(error.message); } };
-  const logout = async () => { try { await api.logout(); } catch {} authStore.clear(); onLogout(); };
 
   const printQueue = () => window.print();
 
@@ -181,41 +151,36 @@ function Dashboard({ faculty, onLogout }) {
         <nav>
           {navItems.map(([id, label, Icon]) => <button key={id} className={page === id ? 'active' : ''} onClick={() => {setPage(id); setSidebarOpen(false)}}><Icon size={20}/><span>{label}</span></button>)}
         </nav>
-        <div className="faculty-card"><div className="avatar">{selectedFaculty?.name?.split(/\s+/).map(x => x[0]).join('').slice(0,2).toUpperCase() || 'AF'}</div><div><strong>{selectedFaculty?.name || 'Select faculty'}</strong><span>{selectedFaculty?.designation || 'NSU Architecture'}</span></div></div>
-        <button className="logout" onClick={logout}><LogOut size={19}/> Sign out</button>
+        <div className="faculty-card"><div className="avatar">AF</div><div><strong>Architecture Faculty One</strong><span>Professor · NSU Architecture</span></div></div>
+        <button className="logout"><LogOut size={19}/> Sign out</button>
       </aside>
 
       <main>
         <header className="topbar">
           <button className="menu-button" onClick={() => setSidebarOpen(v => !v)}><Menu/></button>
           <div><h1>{navItems.find(x => x[0] === page)?.[1]}</h1><p>{new Date().toLocaleDateString(undefined, {weekday:'long', year:'numeric', month:'long', day:'numeric'})}</p></div>
-          <div className="top-actions"><div className="notification-wrap"><button className="icon-button" onClick={() => setNotificationsOpen(v => !v)} aria-label="Notifications"><Bell size={20}/>{unreadCount > 0 && <span className="notification-count">{unreadCount > 99 ? "99+" : unreadCount}</span>}</button>{notificationsOpen && <div className="notification-panel"><div className="notification-header"><div><strong>Notifications</strong><span>{unreadCount} unread</span></div><button onClick={markAllRead}>Mark all read</button></div><div className="notification-list">{notifications.length ? notifications.map(item => <button key={item.id} className={`notification-item ${item.readAt ? "" : "unread"}`} onClick={() => openNotification(item)}><span className="notification-type">{item.title}</span><strong>{item.token || "Queue update"}</strong><p>{item.message}</p><small>{new Date(item.createdAt).toLocaleString()}</small></button>) : <div className="notification-empty">No notifications yet.</div>}</div></div>}</div><div className="top-profile"><div className="avatar small">{selectedFaculty?.name?.split(/\s+/).map(x => x[0]).join('').slice(0,2).toUpperCase() || 'AF'}</div><span>{selectedFaculty?.name || 'Select faculty'}</span></div></div>
+          <div className="top-actions"><button className="icon-button"><Bell size={20}/><span className="notification-dot"/></button><div className="top-profile"><div className="avatar small">AF</div><span>Architecture Faculty One</span></div></div>
         </header>
 
         <section className="content">
 
-          {arrivalNotice && <div className="arrival-overlay" role="alertdialog" aria-live="assertive">
-            <div className="arrival-screen">
-              <div className="arrival-icon"><Bell size={42}/></div>
-              <p className="eyebrow">SCANNED TICKET DETAILS</p>
-              <h1>STUDENT AT YOUR DOOR</h1>
-              <p className="arrival-instruction">Choose one response to send it instantly to the scanner screen.</p>
-              <div className="arrival-ticket">
-                <div><span>Token</span><strong>{arrivalNotice.token}</strong></div>
-                <div><span>Student Name</span><strong>{arrivalNotice.studentName}</strong></div>
-                <div><span>Student ID</span><strong>{arrivalNotice.studentId}</strong></div>
-                <div><span>Service</span><strong>{arrivalNotice.service}</strong></div>
-                <div><span>Booking</span><strong>{arrivalNotice.date} · {formatTime(arrivalNotice.startTime)}–{formatTime(arrivalNotice.endTime)}</strong></div>
-              </div>
-              <div className="arrival-actions large">
-                <button className="secondary" onClick={() => respondToArrival(arrivalNotice, 'WAIT')}><PauseCircle size={24}/> WAIT</button>
-                <button className="success" onClick={() => respondToArrival(arrivalNotice, 'COME_IN')}><UserCheck size={24}/> COME IN</button>
-              </div>
+          {arrivalNotice && <div className="arrival-alert">
+            <div className="arrival-icon"><Bell size={28}/></div>
+            <div className="arrival-copy">
+              <p className="eyebrow">STUDENT AT YOUR DOOR</p>
+              <h2>{arrivalNotice.studentName}</h2>
+              <p><strong>{arrivalNotice.studentId}</strong> · Token {arrivalNotice.token}</p>
+              <p>{arrivalNotice.service}</p>
+              <p><strong>Booking:</strong> {arrivalNotice.date} · {formatTime(arrivalNotice.startTime)}–{formatTime(arrivalNotice.endTime)}</p>
+            </div>
+            <div className="arrival-actions">
+              <button className="secondary" onClick={() => respondToArrival(arrivalNotice, 'WAIT')}><PauseCircle size={18}/> Please Wait</button>
+              <button className="success" onClick={() => respondToArrival(arrivalNotice, 'COME_IN')}><UserCheck size={18}/> Come In</button>
             </div>
           </div>}
           {connectionError && <div className="welcome-card"><div><p className="eyebrow">SERVER OFFLINE</p><h2>Dashboard cannot reach the shared API</h2><p>Start the backend on port 8080. {connectionError}</p></div><button className="primary" onClick={loadAll}>Retry</button></div>}
           {page === 'dashboard' && <>
-            <div className="welcome-card"><div><p className="eyebrow">GOOD MORNING</p><h2>Manage today’s student service queue</h2><p>QR and NFC arrivals open the student ticket page automatically in real time.</p></div><button className={queuePaused ? 'primary' : 'secondary'} onClick={() => setQueuePaused(v => !v)}>{queuePaused ? <RefreshCw size={18}/> : <PauseCircle size={18}/>} {queuePaused ? 'Resume Queue' : 'Pause Queue'}</button></div>
+            <div className="welcome-card"><div><p className="eyebrow">GOOD MORNING</p><h2>Manage today’s student service queue</h2><p>New POS tickets appear here automatically within three seconds.</p></div><button className={queuePaused ? 'primary' : 'secondary'} onClick={() => setQueuePaused(v => !v)}>{queuePaused ? <RefreshCw size={18}/> : <PauseCircle size={18}/>} {queuePaused ? 'Resume Queue' : 'Pause Queue'}</button></div>
             <div className="stats-grid"><StatCard label="Today’s appointments" value={metrics.total} hint="All scheduled students"/><StatCard label="Waiting" value={metrics.waiting} hint="Checked in or called"/><StatCard label="Completed" value={metrics.completed} hint="Finished services"/><StatCard label="Upcoming" value={metrics.upcoming} hint="Not checked in yet"/></div>
             <div className="panel">
               <div className="panel-header"><div><h3>Today’s queue</h3><p>Live appointment overview</p></div><button className="text-button" onClick={() => setPage('queue')}>View all <ChevronRight size={17}/></button></div>
@@ -254,28 +219,4 @@ function Dashboard({ faculty, onLogout }) {
       {modal?.type === 'serviceHour' && <Modal title={modal.item ? 'Edit Service Hour' : 'Add Service Hour'} onClose={() => setModal(null)}><form onSubmit={saveServiceHour} className="form-grid two"><label>Day<select name="day" defaultValue={modal.item?.day || 'Sunday'}>{['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d => <option key={d}>{d}</option>)}</select></label><label>Service<select name="service" defaultValue={modal.item?.service || services[0]?.name}>{services.map(s => <option key={s.id}>{s.name}</option>)}</select></label><label>Start time<input name="start" type="time" required defaultValue={modal.item?.start || '15:00'}/></label><label>End time<input name="end" type="time" required defaultValue={modal.item?.end || '17:00'}/></label><label>Minutes per student<input name="duration" type="number" min="5" required defaultValue={modal.item?.duration || 15}/></label><div className="modal-actions full"><button type="button" className="secondary" onClick={() => setModal(null)}>Cancel</button><button className="primary">Save Schedule</button></div></form></Modal>}
     </div>
   );
-}
-
-
-function Login({ onAuthenticated }) {
-  const [login, setLogin] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const submit = async event => {
-    event.preventDefault(); setLoading(true); setError('');
-    try { const result = await api.login(login.trim(), password); authStore.set(result.token); onAuthenticated(result.faculty); }
-    catch (e) { setError(e.message); }
-    finally { setLoading(false); }
-  };
-  return <div className="login-page"><div className="login-card"><div className="login-brand"><div className="brand-mark">NSU</div><div><h1>Architecture Faculty Portal</h1><p>North South University</p></div></div><form onSubmit={submit}><label>Employee ID or university email<input value={login} onChange={e=>setLogin(e.target.value)} autoComplete="username" required placeholder="ARCH-FAC-001"/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/></label>{error && <div className="login-error">{error}</div>}<button className="primary login-submit" disabled={loading}>{loading ? 'Signing in…' : 'Sign in'}</button></form><small>Initial test password: <strong>ChangeMe123!</strong>. Change it before production.</small></div></div>;
-}
-
-export default function App() {
-  const [faculty, setFaculty] = useState(null);
-  const [checking, setChecking] = useState(Boolean(authStore.get()));
-  useEffect(() => { if (!authStore.get()) { setChecking(false); return; } api.me().then(r => setFaculty(r.faculty)).catch(() => authStore.clear()).finally(() => setChecking(false)); }, []);
-  if (checking) return <div className="auth-loading">Checking faculty session…</div>;
-  if (!faculty) return <Login onAuthenticated={setFaculty}/>;
-  return <Dashboard faculty={faculty} onLogout={() => setFaculty(null)}/>;
 }
