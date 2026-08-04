@@ -5,9 +5,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BiConsumer;
 
 final class ApiClient {
     record ScanResult(boolean accepted, String reason, String message, String appointmentId, String token, String studentName,
@@ -64,24 +61,6 @@ final class ApiClient {
         return new CallDisplay(Json.bool(json,"active"),Json.string(call,"appointmentId"),Json.string(call,"token"),
                 Json.string(call,"studentId"),Json.string(call,"studentName"),Json.string(call,"service"),
                 Json.string(call,"startTime"),Json.string(call,"endTime"),Json.string(call,"status"));
-    }
-
-    AutoCloseable streamAppointment(String appointmentId, BiConsumer<String,String> onEvent, java.util.function.Consumer<Throwable> onError) {
-        AtomicBoolean closed=new AtomicBoolean(false);
-        var req=HttpRequest.newBuilder(URI.create(baseUrl+"/api/realtime/appointments/"+java.net.URLEncoder.encode(appointmentId, java.nio.charset.StandardCharsets.UTF_8)))
-                .header("Accept","text/event-stream").header("X-Device-Key",deviceKey).GET().build();
-        CompletableFuture<HttpResponse<java.util.stream.Stream<String>>> future=client.sendAsync(req,HttpResponse.BodyHandlers.ofLines());
-        future.thenAcceptAsync(response->{
-            if(response.statusCode()!=200)throw new java.util.concurrent.CompletionException(new IllegalStateException("Live server returned HTTP "+response.statusCode()));
-            final String[] event={"message"};
-            try(var lines=response.body()){
-                lines.takeWhile(line->!closed.get()).forEach(line->{
-                    if(line.startsWith("event:"))event[0]=line.substring(6).trim();
-                    else if(line.startsWith("data:")){String data=line.substring(5).trim();onEvent.accept(event[0],data);event[0]="message";}
-                });
-            }
-        }).exceptionally(error->{if(!closed.get())onError.accept(error.getCause()==null?error:error.getCause());return null;});
-        return ()->{closed.set(true);future.cancel(true);};
     }
 
     private ScanResult sendScan(String endpoint, String body) throws Exception {

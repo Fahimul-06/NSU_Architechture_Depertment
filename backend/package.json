@@ -1,6 +1,6 @@
 {
   "name": "nsu-architecture-queue-backend",
-  "version": "2.2.0-event-stream",
+  "version": "2.2.0-ticket-page",
   "private": true,
   "type": "module",
   "scripts": {

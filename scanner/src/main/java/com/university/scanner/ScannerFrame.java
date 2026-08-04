@@ -18,7 +18,6 @@ final class ScannerFrame extends JFrame {
     private final String facultyId;
     private String lastCallAppointmentId="";
     private Timer facultyPollTimer;
-    private AutoCloseable appointmentStream;
     private String waitingAppointmentId;
     private String waitingDetails;
 
@@ -70,12 +69,8 @@ final class ScannerFrame extends JFrame {
     }
     private void startFacultyPolling(String appointmentId) {
         waitingAppointmentId=appointmentId;
-        try {
-            appointmentStream=api.streamAppointment(appointmentId,(event,data)->SwingUtilities.invokeLater(this::pollFacultyResponse),
-                    error->SwingUtilities.invokeLater(()->resultMessage.setText("Live connection retrying; fallback polling remains active.")));
-        } catch(Exception ignored) {}
-        facultyPollTimer=new Timer(5000,e->pollFacultyResponse());
-        facultyPollTimer.setInitialDelay(300);
+        facultyPollTimer=new Timer(750,e->pollFacultyResponse());
+        facultyPollTimer.setInitialDelay(250);
         facultyPollTimer.start();
     }
     private void pollFacultyResponse() {
@@ -117,7 +112,7 @@ final class ScannerFrame extends JFrame {
             }
         }.execute();
     }
-    private void stopFacultyPolling(){if(facultyPollTimer!=null){facultyPollTimer.stop();facultyPollTimer=null;}if(appointmentStream!=null){try{appointmentStream.close();}catch(Exception ignored){}appointmentStream=null;}waitingAppointmentId=null;}
+    private void stopFacultyPolling(){if(facultyPollTimer!=null){facultyPollTimer.stop();facultyPollTimer=null;}waitingAppointmentId=null;}
 
     private void pollCallDisplay() {
         new SwingWorker<ApiClient.CallDisplay,Void>(){

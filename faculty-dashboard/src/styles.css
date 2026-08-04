@@ -26,6 +26,5 @@
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes doorPulse{from{transform:scale(.995);box-shadow:0 30px 100px rgba(0,0,0,.38)}to{transform:scale(1.008);box-shadow:0 30px 110px rgba(245,158,11,.42)}}
 @media(max-width:700px){.arrival-ticket{grid-template-columns:1fr}.arrival-screen{padding:24px}.arrival-actions.large{flex-direction:column}.arrival-actions.large button{width:100%}}
-.live-status{position:fixed;right:18px;bottom:18px;z-index:2500;padding:8px 12px;border-radius:999px;font-size:12px;font-weight:800;letter-spacing:.08em;background:#fff;box-shadow:0 8px 28px rgba(15,23,42,.18)}
-.live-connected{color:#087443}.live-connecting{color:#8a5a00}.live-disconnected{color:#b42318}
-.live-pill{padding:7px 10px;border-radius:999px;font-size:11px;font-weight:900;letter-spacing:.08em;background:#eef2f7;white-space:nowrap}.live-pill.live-connected{background:#e8f7ef;color:#087443}.live-pill.live-connecting{background:#fff5dc;color:#8a5a00}.live-pill.live-disconnected{background:#fff0ee;color:#b42318}
+
+.arrival-instruction{margin:-14px 0 24px;color:#475569;font-size:17px;font-weight:650}.arrival-screen .arrival-icon{margin:0 auto 8px}.arrival-actions.large .secondary{background:#f59e0b;color:#111827;border:0}.arrival-actions.large .success{background:#16a34a;color:#fff}.arrival-actions.large button:disabled{opacity:.65;cursor:not-allowed}
